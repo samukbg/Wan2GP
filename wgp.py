@@ -182,8 +182,12 @@ def release_model():
     if "_cache" in offload.shared_state:
         del offload.shared_state["_cache"]
     if offloadobj is not None:
-        offloadobj.release()
-        offloadobj = None
+        try:
+            offloadobj.release()
+        except Exception as _e:
+            print(f"[release_model] offloadobj.release() failed: {_e}")
+        finally:
+            offloadobj = None
     offload.flush_torch_caches()
     reload_needed = True
 def get_unique_id():
@@ -11514,9 +11518,17 @@ def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale
     finally:
         try:
             release_model()
-            print("[API /generate] Model unloaded — RAM freed for next request.")
+            # Synchronise CUDA and flush all caches so VRAM and RAM are
+            # returned to the OS before the next request is allowed through.
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+            offload.flush_torch_caches()
+            gc.collect()
+            print("[API /generate] Model unloaded and caches flushed.")
         except Exception as _e:
-            print(f"[API /generate] Warning: model unload failed: {_e}")
+            print(f"[API /generate] Warning: model unload/flush failed: {_e}")
         release_generation_slot()
 
 
