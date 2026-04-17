@@ -36,7 +36,9 @@ def expand_slist(slists_dict, mult_no, num_inference_steps, model_switch_step, m
         return expand_one(phase1, model_switch_step) + expand_one(phase2, model_switch_step2 - model_switch_step) + expand_one(phase3, num_inference_steps - model_switch_step2)
 
 def parse_loras_multipliers(loras_multipliers, nb_loras, num_inference_steps, merge_slist = None, nb_phases = 2, model_switch_step = None, model_switch_step2 = None, model_switch_phase = 1):
-    if "|" in loras_multipliers: 
+    if loras_multipliers is None:
+        loras_multipliers = ""
+    if isinstance(loras_multipliers, str) and "|" in loras_multipliers: 
         pos = loras_multipliers.find("|")
         if "|" in  loras_multipliers[pos+1:]: return "", "", "There can be only one '|' character in Loras Multipliers Sequence"
 

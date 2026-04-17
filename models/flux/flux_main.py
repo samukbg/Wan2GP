@@ -125,6 +125,7 @@ class model_factory:
                 self.vae  = AutoencoderKLFlux2(AutoEncoderParamsFlux2())
 
             offload.load_model_data(self.vae, fl.locate_file("flux2_vae.safetensors"), writable_tensors= False, )
+            offload.change_dtype(self.vae, self.VAE_dtype, True)
             self.vae_scale_factor = 8
         else:
             self.t5 = load_t5(torch_device, text_encoder_filename, max_length=512)
@@ -311,6 +312,23 @@ class model_factory:
             radiance = self.name in ['flux-chroma-radiance']
             flux_kontext_dreamomni2 = self.name in ['flux-dev-kontext-dreamomni2']
 
+            image_start = bbargs.get("image_start")
+            input_video = bbargs.get("input_video")
+            if image_start is not None or input_video is not None:
+                if input_ref_images is None:
+                    input_ref_images = []
+                
+                # Ensure all existing input_ref_images are PIL
+                input_ref_images = [convert_tensor_to_image(img) if torch.is_tensor(img) else img for img in input_ref_images]
+
+                added_images = []
+                if image_start is not None:
+                    added_images.append(convert_tensor_to_image(image_start))
+                if input_video is not None:
+                    added_images.append(convert_tensor_to_image(input_video))
+                
+                input_ref_images = added_images + input_ref_images
+
             if flux2:
                 if input_frames is not None:
                     input_ref_images = [convert_tensor_to_image(input_frames) ] + (input_ref_images or [])
@@ -351,6 +369,7 @@ class model_factory:
                     inp["original_image_latents"], _ = encode_image_refs(self.vae, [input_ref_images[0].resize((width, height), resample=Image.Resampling.LANCZOS)]) 
 
                 if input_ref_images is not None and len(input_ref_images):
+                    print(f"Encoding {len(input_ref_images)} reference images for Flux 2")
                     cond_latents, cond_ids = encode_image_refs(self.vae, input_ref_images)
                     cond_latents, cond_ids = cond_latents.expand(batch_size, -1, -1), cond_ids.expand(batch_size, -1, -1)
                     inp.update({"img_cond_seq": cond_latents, "img_cond_seq_ids": cond_ids})

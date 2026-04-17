@@ -59,6 +59,7 @@ def parse_wgp_args(family_handlers: Sequence[str], config_filename: str, default
     add("--theme", type=str, default="", help="set UI Theme")
     add("--perc-reserved-mem-max", type=float, default=0, help="percent of RAM allocated to Reserved RAM")
     add("--server-name", type=str, default="", help="Server name")
+    add("--root-path", type=str, default="", help="Public root path/URL for the server (useful for proxies/tunnels)")
     add("--gpu", type=str, default="", help="Default GPU Device")
     add("--open-browser", action="store_true", help="open browser")
     add("--t2v", action="store_true", help="text to video mode")

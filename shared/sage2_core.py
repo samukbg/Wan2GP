@@ -185,19 +185,45 @@ def sageattn(
     - All tensors must be on the same cuda device.
     """
         
-    arch = _get_cuda_arch(qkv_list[0].device)
-    if arch == "sm80":
-        return sageattn_qk_int8_pv_fp16_cuda(qkv_list, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse, pv_accum_dtype="fp32")
-    elif arch == "sm86":
-        return sageattn_qk_int8_pv_fp16_triton(qkv_list, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse)
-    elif arch == "sm89":
-        return sageattn_qk_int8_pv_fp8_cuda(qkv_list, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse, pv_accum_dtype="fp32+fp16" if sg2pp else "fp32+fp32", recycle_q = recycle_q)
-    elif arch == "sm90":
-        return sageattn_qk_int8_pv_fp8_cuda_sm90(qkv_list, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse, pv_accum_dtype="fp32+fp32", recycle_q = recycle_q)
-    elif arch == "sm120":
-        return sageattn_qk_int8_pv_fp8_cuda(qkv_list, tensor_layout=tensor_layout, is_causal=is_causal, qk_quant_gran="per_warp", sm_scale=sm_scale, return_lse=return_lse, pv_accum_dtype= "fp32+fp16" if sg2pp else "fp32", smooth_v= not sg2pp, recycle_q = recycle_q) # sm120 has accurate fp32 accumulator for fp8 mma and triton kernel is currently not usable on sm120.
-    else:
-        raise ValueError(f"Unsupported CUDA architecture: {arch}")
+    # Save tensor references before the called function clears qkv_list, so we
+    # can fall back to PyTorch SDPA if Triton's JIT launcher DLL is blocked by
+    # Windows Application Control policy.
+    q_ref, k_ref, v_ref = qkv_list[0], qkv_list[1], qkv_list[2]
+
+    arch = _get_cuda_arch(q_ref.device)
+    try:
+        if arch == "sm80":
+            return sageattn_qk_int8_pv_fp16_cuda(qkv_list, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse, pv_accum_dtype="fp32")
+        elif arch == "sm86":
+            return sageattn_qk_int8_pv_fp16_triton(qkv_list, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse)
+        elif arch == "sm89":
+            return sageattn_qk_int8_pv_fp8_cuda(qkv_list, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse, pv_accum_dtype="fp32+fp16" if sg2pp else "fp32+fp32", recycle_q = recycle_q)
+        elif arch == "sm90":
+            return sageattn_qk_int8_pv_fp8_cuda_sm90(qkv_list, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse, pv_accum_dtype="fp32+fp32", recycle_q = recycle_q)
+        elif arch == "sm120":
+            return sageattn_qk_int8_pv_fp8_cuda(qkv_list, tensor_layout=tensor_layout, is_causal=is_causal, qk_quant_gran="per_warp", sm_scale=sm_scale, return_lse=return_lse, pv_accum_dtype= "fp32+fp16" if sg2pp else "fp32", smooth_v= not sg2pp, recycle_q = recycle_q) # sm120 has accurate fp32 accumulator for fp8 mma and triton kernel is currently not usable on sm120.
+        else:
+            raise ValueError(f"Unsupported CUDA architecture: {arch}")
+    except ImportError as e:
+        # Windows Application Control can block Triton's JIT-compiled launcher DLL.
+        # Fall back to PyTorch's native scaled_dot_product_attention so generation
+        # can continue (slightly slower / less memory-efficient, but correct).
+        print(f"[WARN] sageattn Triton kernel blocked ({e}); falling back to PyTorch SDPA for this step.")
+        qkv_list.clear()
+        q, k, v = q_ref, k_ref, v_ref
+        del q_ref, k_ref, v_ref
+        scale = sm_scale if sm_scale is not None else q.size(-1) ** -0.5
+        if tensor_layout == "NHD":
+            # [B, N, H, D] → [B, H, N, D]
+            q = q.transpose(1, 2).contiguous()
+            k = k.transpose(1, 2).contiguous()
+            v = v.transpose(1, 2).contiguous()
+        o = F.scaled_dot_product_attention(q, k, v, scale=scale, is_causal=is_causal)
+        if tensor_layout == "NHD":
+            o = o.transpose(1, 2).contiguous()
+        if return_lse:
+            return o, None
+        return o
 
 @torch.compiler.disable
 def sageattn_qk_int8_pv_fp16_triton(

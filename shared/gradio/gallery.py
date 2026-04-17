@@ -370,7 +370,7 @@ class AdvancedMediaGallery:
             sel = 0 if items else None
         st["items"] = items; st["selected"] = sel
 
-        upload_update = gr.update(file_count=("single" if st["single"] else "multiple"))
+        upload_update = gr.update(label=("Set" if st["single"] else "Add"))
         left_update   = gr.update(visible=not st["single"])
         right_update  = gr.update(visible=not st["single"])
         clear_update  = gr.update(visible=not st["single"])
@@ -422,7 +422,7 @@ class AdvancedMediaGallery:
                 self.upload_btn = gr.UploadButton(
                     "Set" if self._initial_state["single"] else "Add",
                     file_types=exts,
-                    file_count=("single" if self._initial_state["single"] else "multiple"),
+                    file_count="multiple",
                     variant="primary",
                     size="sm",
                     min_width=1,

@@ -59,7 +59,9 @@ from shared.utils.process_locks import (
     set_main_generation_running,
     unregister_GPU_resident,
 )
+from shared.utils.resource_guard import acquire_generation_slot, release_generation_slot, resource_status as _resource_status
 from shared.deepy.config import get_deepy_default_runtime_config, set_deepy_runtime_config
+from workflow_endpoints import setup_workflow_endpoints
 from shared.loras_migration import migrate_loras_layout
 from huggingface_hub import hf_hub_download, snapshot_download
 from shared.utils import files_locator as fl 
@@ -293,13 +295,99 @@ def compute_sliding_window_no(current_video_length, sliding_window_size, discard
     left_after_first_window = current_video_length - sliding_window_size + discard_last_frames
     return 1 + math.ceil(left_after_first_window / (sliding_window_size - discard_last_frames - reuse_frames))
 
+def extract_gradio_path(inp):
+    if not inp: return None
+
+    # If it's a string, it might be a stringified dictionary or JSON list
+    if isinstance(inp, str):
+        inp_strip = inp.strip()
+        if (inp_strip.startswith('{') and inp_strip.endswith('}')) or (inp_strip.startswith('[') and inp_strip.endswith(']')):
+            import json
+            try:
+                # Try JSON first
+                data = json.loads(inp_strip.replace("'", '"')) # Simple fix for Python repr vs JSON
+                return extract_gradio_path(data)
+            except:
+                # If JSON fails, it might be a Python repr string
+                try:
+                    import ast
+                    data = ast.literal_eval(inp_strip)
+                    return extract_gradio_path(data)
+                except:
+                    pass
+        return inp
+
+    if isinstance(inp, dict) and 'path' in inp: return inp['path']
+    if isinstance(inp, list) and len(inp) > 0:
+        return extract_gradio_path(inp[0])
+    return None
+
+
+def download_url_to_temp(url, suffix=None):
+    """Download an HTTP/HTTPS URL to a temp file and return its local path.
+    Returns the original value unchanged if it is not an HTTP/HTTPS URL."""
+    if not isinstance(url, str):
+        return url
+    if not (url.startswith('http://') or url.startswith('https://')):
+        return url
+    import urllib.request, tempfile, os
+    if suffix is None:
+        # Guess extension from the URL path
+        url_path = url.split('?')[0]
+        ext = os.path.splitext(url_path)[1]
+        suffix = ext if ext else '.tmp'
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    try:
+        print(f"[API] Downloading {url} → {tmp.name}")
+        urllib.request.urlretrieve(url, tmp.name)
+        return tmp.name
+    except Exception as e:
+        print(f"[API] Failed to download {url}: {e}")
+        tmp.close()
+        os.unlink(tmp.name)
+        return None
+
 def clean_image_list(gradio_list):
+    if gradio_list is None: return None
+    
+    # Robustly handle input format (sometimes arrives as stringified JSON from state/API)
+    if isinstance(gradio_list, str):
+        gl_strip = gradio_list.strip()
+        if (gl_strip.startswith('{') and gl_strip.endswith('}')) or (gl_strip.startswith('[') and gl_strip.endswith(']')):
+            import json
+            try:
+                gradio_list = json.loads(gl_strip.replace("'", '"'))
+            except:
+                try:
+                    import ast
+                    gradio_list = ast.literal_eval(gl_strip)
+                except:
+                    pass
+
     if not isinstance(gradio_list, list): gradio_list = [gradio_list]
-    gradio_list = [ tup[0] if isinstance(tup, tuple) else tup for tup in gradio_list ]        
+
+    # Extract paths from Gradio 5 FileData dictionaries or tuples
+    new_list = []
+    for item in gradio_list:
+        if isinstance(item, tuple):
+            new_list.append(item[0])
+        elif isinstance(item, dict) and 'path' in item:
+            new_list.append(item['path'])
+        elif isinstance(item, str):
+            # Recurse for stringified dicts/lists inside the list
+            stripped = item.strip()
+            if (stripped.startswith('{') and stripped.endswith('}')) or (stripped.startswith('[') and stripped.endswith(']')):
+                path = extract_gradio_path(item)
+                new_list.append(path if path else item)
+            else:
+                new_list.append(item)
+        else:
+            new_list.append(item)
+    gradio_list = new_list
 
     if any( not isinstance(image, (Image.Image, str))  for image in gradio_list): return None
-    if any( isinstance(image, str) and not has_image_file_extension(image) for image in gradio_list): return None
-    gradio_list = [ convert_image( Image.open(img) if isinstance(img, str) else img  ) for img in gradio_list  ]        
+    if any( isinstance(image, str) and not (has_image_file_extension(image) or has_video_file_extension(image)) for image in gradio_list): return None
+    gradio_list = [ convert_image( Image.open(img) if isinstance(img, str) else img  ) for img in gradio_list  ]
     return gradio_list
 
 
@@ -807,7 +895,7 @@ def validate_settings(state, model_type, single_prompt, inputs, silent=False):
         if image_mode not in model_def.get("vae_upsampler", []):
             return err(f"VAE Spatial Upsampling is not available for {medium}")
 
-    if len(activated_loras) > 0:
+    if activated_loras is not None and len(activated_loras) > 0:
         activated_loras = update_loras_url_cache(get_lora_dir(model_type), activated_loras)
         inputs["activated_loras"] = activated_loras
         error = check_loras_exist(model_type, activated_loras)
@@ -818,8 +906,8 @@ def validate_settings(state, model_type, single_prompt, inputs, silent=False):
     else:
         guidance_phases = min(guidance_phases, model_def.get("guidance_max_phases", 0))
                           
-    if len(loras_multipliers) > 0:
-        _, _, errors =  parse_loras_multipliers(loras_multipliers, len(activated_loras), num_inference_steps, nb_phases= guidance_phases)
+    if loras_multipliers is not None and len(loras_multipliers) > 0:
+        _, _, errors =  parse_loras_multipliers(loras_multipliers, len(activated_loras or []), num_inference_steps, nb_phases= guidance_phases)
         if len(errors) > 0: 
             return err(f"Error parsing Loras Multipliers: {errors}")
     if guidance_phases == 3:
@@ -864,7 +952,7 @@ def validate_settings(state, model_type, single_prompt, inputs, silent=False):
 
     if audio_source is not None and MMAudio_setting != 0:
         return err("MMAudio and Custom Audio Soundtrack can't not be used at the same time")
-    if len(filter_letters(image_prompt_type, "VLG")) > 0 and len(keep_frames_video_source) > 0:
+    if len(filter_letters(image_prompt_type, "VLG")) > 0 and (isinstance(keep_frames_video_source, int) or len(keep_frames_video_source or "") > 0):
         if not is_integer(keep_frames_video_source) or int(keep_frames_video_source) == 0:
             return err("The number of frames to keep must be a non null integer")
     else:
@@ -4892,14 +4980,10 @@ def preprocess_video(height, width, video_in, max_frames, start_frame=0, fit_can
 
  
 def parse_keep_frames_video_guide(keep_frames, video_length):
-        
-    def absolute(n):
-        if n==0:
-            return 0
-        elif n < 0:
-            return max(0, video_length + n)
-        else:
-            return min(n-1, video_length-1)
+    if keep_frames is None:
+        return [True] * video_length, ""
+    if isinstance(keep_frames, int):
+        keep_frames = str(keep_frames)
     keep_frames = keep_frames.strip()
     if len(keep_frames) == 0:
         return [True] *video_length, "" 
@@ -5701,6 +5785,7 @@ def generate_video(
     mode,
     plugin_data=None,
 ):
+    return_path = None
 
     def remove_temp_filenames(temp_filenames_list):
         for temp_filename in temp_filenames_list: 
@@ -5736,7 +5821,7 @@ def generate_video(
             if min_frames_if_references >= 1000:
                 video_length = min_frames_if_references - 1000
             else:
-                video_length = min_frames_if_references if "I" in video_prompt_type or "V" in video_prompt_type else 1 
+                video_length = min_frames_if_references if "I" in video_prompt_type or "V" in video_prompt_type else 1
     else:
         batch_size = 1
     temp_filenames_list = []
@@ -5830,8 +5915,11 @@ def generate_video(
     audio_sampling_rate = 16000
 
     prompts = prompt_parser.split_prompt_units(prompt, multi_prompts_gen_type)
-    parsed_keep_frames_video_source= max_source_video_frames if len(keep_frames_video_source) ==0 else int(keep_frames_video_source) 
+    parsed_keep_frames_video_source= max_source_video_frames if (isinstance(keep_frames_video_source, str) and len(keep_frames_video_source) == 0) or keep_frames_video_source is None else int(keep_frames_video_source) 
     transformer_loras_filenames, transformer_loras_multipliers  = get_transformer_loras(model_type)
+    loras_selected = []
+    loras_list_mult_choices_nums = []
+    loras_slists = []
     if guidance_phases < 1: guidance_phases = 1
     if transformer_loras_filenames != None:
         loras_list_mult_choices_nums, loras_slists, errors =  parse_loras_multipliers(transformer_loras_multipliers, len(transformer_loras_filenames), num_inference_steps, nb_phases = guidance_phases, model_switch_phase= model_switch_phase )
@@ -5844,7 +5932,7 @@ def generate_video(
         if len(errors) > 0: raise Exception(f"Error parsing Extra Transformer Loras: {errors}")
         loras_selected += extra_loras_transformers 
 
-    if len(activated_loras) > 0:
+    if activated_loras is not None and len(activated_loras) > 0:
         loras_list_mult_choices_nums, loras_slists, errors =  parse_loras_multipliers(loras_multipliers, len(activated_loras), num_inference_steps, nb_phases = guidance_phases, merge_slist= loras_slists, model_switch_phase= model_switch_phase )
         if len(errors) > 0: raise Exception(f"Error parsing Loras: {errors}")
         lora_dir = get_lora_dir(model_type)
@@ -5905,6 +5993,10 @@ def generate_video(
     hunyuan_custom_edit =  hunyuan_custom and "edit" in model_filename
     fantasy = base_model_type in ["fantasy"]
     multitalk = model_def.get("multitalk_class", False)
+
+    audio_prompt_type = audio_prompt_type or ""
+    image_prompt_type = image_prompt_type or ""
+    video_prompt_type = video_prompt_type or ""
 
     if "B" in audio_prompt_type or "X" in audio_prompt_type:
         from models.wan.multitalk.multitalk import parse_speakers_locations
@@ -5969,7 +6061,7 @@ def generate_video(
 
     joint_pass = boost ==1 #and profile != 1 and profile != 3  
     
-    skip_steps_cache = None if len(skip_steps_cache_type) == 0 else DynamicClass(cache_type = skip_steps_cache_type) 
+    skip_steps_cache = None if not skip_steps_cache_type else DynamicClass(cache_type = skip_steps_cache_type) 
 
     if skip_steps_cache != None:
         skip_steps_cache.update({     
@@ -6093,12 +6185,12 @@ def generate_video(
     first_window_video_length = current_video_length
     original_prompts = prompts.copy()
     gen["sliding_window"] = sliding_window 
-    while not abort: 
+    while not abort:
         extra_generation += gen.get("extra_orders",0)
         gen["extra_orders"] = 0
         total_generation = repeat_generation + extra_generation
-        gen["total_generation"] = total_generation     
-        gen["header_text"] = ""    
+        gen["total_generation"] = total_generation
+        gen["header_text"] = ""
         if repeat_no >= total_generation: break
         repeat_no +=1
         gen["repeat_no"] = repeat_no
@@ -6592,7 +6684,7 @@ def generate_video(
                     top_k=top_k,
                     set_progress_status=set_progress_status,
                     loras_selected=loras_selected,
-                    frames_relative_positions_list = frames_relative_positions_list,                 
+                    frames_relative_positions_list = frames_relative_positions_list,
                 )
             except Exception as e:
                 if len(control_audio_tracks) > 0 or len(source_audio_tracks) > 0:
@@ -6670,7 +6762,7 @@ def generate_video(
             if samples == None:
                 abort = True
                 state["prompt"] = ""
-                send_cmd("output")  
+                send_cmd("output")
             else:
                 sample = samples.cpu()
                 abort = abort_scheduled or not (is_image or audio_only) and sample.shape[1] < current_video_length    
@@ -6867,6 +6959,7 @@ def generate_video(
                 configs["creation_timestamp"] = int(end_time)
                 # if sample_is_image: configs["is_image"] = True
                 record_file_metadata(video_path, configs, is_image, audio_only, gen, embedded_images=embedded_images, replace_last_file=sliding_window and window_no > 1 and not server_config.get("keep_intermediate_sliding_windows", 1))
+                return_path = video_path
 
                 embedded_images = None
                 # Play notification sound for single video
@@ -6896,7 +6989,7 @@ def generate_video(
         cleanup_temp_audio_files(control_audio_tracks + source_audio_tracks)
 
     remove_temp_filenames(temp_filenames_list)
-    return True
+    return return_path
 
 def prepare_generate_video(state):    
 
@@ -7172,6 +7265,302 @@ def process_tasks(state):
     gen["status"] = status
     gen["status_display"] =  False
     release_gen()
+
+
+def api_endpoint_handler(
+    model_type,
+    prompt,
+    num_inference_steps,
+    guidance_scale,
+    resolution,
+    video_length,
+    seed,
+    image_mode,
+    denoising_strength,
+    image_start,
+    audio_input,
+    override_profile,
+    masking_strength
+):
+    # Wait until RAM/VRAM are sufficient and no other generation is running.
+    # This never times out — requests queue up and are served in FIFO order.
+    acquire_generation_slot(model_type)
+
+    try:
+        return _api_endpoint_handler_inner(
+            model_type, prompt, num_inference_steps, guidance_scale,
+            resolution, video_length, seed, image_mode, denoising_strength,
+            image_start, audio_input, override_profile, masking_strength
+        )
+    finally:
+        # Always unload the model after a generation (success or failure) so
+        # RAM is freed before the next queued request runs.
+        try:
+            release_model()
+            print("[API /generate] Model unloaded — RAM freed for next request.")
+        except Exception as _unload_err:
+            print(f"[API /generate] Warning: model unload failed: {_unload_err}")
+        release_generation_slot()
+
+
+def _api_endpoint_handler_inner(
+    model_type,
+    prompt,
+    num_inference_steps,
+    guidance_scale,
+    resolution,
+    video_length,
+    seed,
+    image_mode,
+    denoising_strength,
+    image_start,
+    audio_input,
+    override_profile,
+    masking_strength
+):
+    gc.collect()
+
+    # Get the default settings dictionary for the selected model
+    params = get_default_settings(model_type)
+    params["activated_loras"] = []
+    params["loras_multipliers"] = ""
+
+    actual_audio_input = extract_gradio_path(audio_input)
+    if actual_audio_input is not None:
+        actual_audio_input = download_url_to_temp(actual_audio_input)
+    if actual_audio_input is not None:
+        params['audio_source'] = actual_audio_input
+        params['audio_prompt_type'] = 'A'  # enable lipsync; ltx2_handler routes audio_source→audio_guide when "A" is set
+
+    image_refs = None
+    if image_start:
+        from PIL import Image
+        # Handle list vs single input
+        if not isinstance(image_start, list):
+            image_start = [image_start]
+
+        image_refs = []
+        for img_data in image_start:
+            path = extract_gradio_path(img_data)
+            if path and isinstance(path, str):
+                path = download_url_to_temp(path)
+            if path and isinstance(path, str):
+                try:
+                    image_refs.append(Image.open(path).convert("RGB"))
+                except Exception as e:
+                    print(f"Failed to load image from path: {e}")
+            elif isinstance(img_data, Image.Image):
+                image_refs.append(img_data)
+        
+        if len(image_refs) > 0:
+            base_model_type = get_base_model_type(model_type)
+            if base_model_type.startswith("flux2") or base_model_type == "pi_flux2":
+                image_start = None
+            else:
+                image_start = image_refs[0]
+                image_refs = image_refs[1:] if len(image_refs) > 1 else None
+        else:
+            image_start = None
+            image_refs = None
+        
+        if resolution and isinstance(image_start, Image.Image):
+            try:
+                width, height = map(int, resolution.split('x'))
+                if image_start.size != (width, height):
+                    print(f"Resizing image_start from {image_start.size} to ({width}, {height})")
+                    image_start = image_start.resize((width, height), Image.LANCZOS)
+            except Exception as e:
+                print(f"Failed to resize image_start: {e}")
+
+    # A dummy state object is required by some of the underlying functions.
+    state = {
+        "gen": {
+            "queue": [],
+            "file_list": [],
+            "file_settings_list": [],
+            "audio_file_list": [],
+            "audio_file_settings_list": [],
+            "prompt_no": 1,
+            "prompts_max": 1,
+            "total_generation": 1,
+            "repeat_no": 1,
+            "total_windows": 1,
+            "window_no": 1,
+            "process_status": "process:main",
+            "in_progress": True
+        },
+        "model_type": model_type,
+        "advanced": False,
+        "loras_presets": [],
+        "loras": [],
+        "last_model_per_family": server_config.get("last_model_per_family", {}),
+        "last_model_per_type": server_config.get("last_model_per_type", {}),
+        "last_resolution_per_group": server_config.get("last_resolution_per_group", {})
+    }
+
+    params['prompt'] = prompt
+    params['num_inference_steps'] = int(num_inference_steps)
+    params['guidance_scale'] = float(guidance_scale)
+    params['resolution'] = resolution
+    params['seed'] = seed
+    params['image_mode'] = 1 if image_mode else 0
+
+    # Convert video_length from the API string format to an integer frame count.
+    # The Textbox accepts "5s" (duration) or "97" (frames) or "" (use default).
+    # generate_video expects an integer.
+    _fps = get_model_fps(get_base_model_type(model_type))
+    _vl = str(video_length).strip()
+    if _vl.endswith('s') and _vl[:-1].replace('.', '', 1).isdigit():
+        # duration string like "5s" or "5.5s" → convert to frames
+        params['video_length'] = max(1, int(round(float(_vl[:-1]) * _fps)))
+    elif _vl.lstrip('-').isdigit():
+        params['video_length'] = int(_vl)
+    # else: leave the default from the JSON (already an int)
+
+    if image_start:
+        params['image_start'] = image_start
+        params['image_prompt_type'] = "S"
+    if image_refs:
+        params['image_refs'] = image_refs
+    if denoising_strength is not None:
+        params['denoising_strength'] = denoising_strength
+    if masking_strength is not None:
+        params['masking_strength'] = masking_strength
+    if override_profile >= 0:
+        params['override_profile'] = override_profile
+
+    # Ensure params not present in the defaults JSON have correct values.
+    # The generic fallback keyword-matches against parameter names and can
+    # misfire (e.g. "ratio" is a substring of "repeat_gene-ratio-n", zeroing it).
+    # We explicitly set all params that can't be None.
+
+    # Integer / count params
+    params.setdefault('repeat_generation', 1)
+    params.setdefault('batch_size', 1)
+    params.setdefault('guidance_phases', 1)
+    params.setdefault('multi_prompts_gen_type', 0)
+    params.setdefault('multi_images_gen_type', 0)
+    params.setdefault('force_fps', '')  # string: "", "auto", "control", "source", or fps number
+    params.setdefault('MMAudio_setting', 0)
+    params.setdefault('RIFLEx_setting', 0)
+    params.setdefault('self_refiner_setting', 0)
+    params.setdefault('remove_background_images_ref', 0)
+    params.setdefault('mask_expand', 0)
+    params.setdefault('cfg_zero_step', 0)
+
+    # Float params that undergo arithmetic (must not be None)
+    params.setdefault('input_video_strength', 1.0)  # default 1.0 so start image has full influence; keyword fallback would give 0
+    params.setdefault('duration_seconds', 0.0)
+    params.setdefault('pause_seconds', 0.0)
+    params.setdefault('film_grain_saturation', 0.0)
+    params.setdefault('control_net_weight', 0.0)
+    params.setdefault('control_net_weight2', 0.0)
+    params.setdefault('control_net_weight_alt', 0.0)
+    params.setdefault('perturbation_start_perc', 0.0)
+    params.setdefault('perturbation_end_perc', 100.0)
+    params.setdefault('self_refiner_f_uncertainty', 0.0)
+    params.setdefault('self_refiner_certain_percentage', 0.0)
+    # temperature/top_p/top_k must stay None — models interpret None as "use model default"
+    params.setdefault('temperature', None)
+    params.setdefault('top_p', None)
+    params.setdefault('top_k', None)
+
+    # String params — must be "" so len() / startswith() calls don't crash
+    for _str_param in [
+        'alt_prompt', 'negative_prompt', 'sample_solver', 'loras_multipliers',
+        'image_prompt_type', 'model_mode', 'keep_frames_video_source',
+        'video_prompt_type', 'frames_positions', 'keep_frames_video_guide',
+        'video_guide_outpainting', 'video_guide_outpainting_ratio',
+        'audio_prompt_type', 'speakers_locations',
+        'temporal_upsampling', 'spatial_upsampling',
+        'MMAudio_prompt', 'MMAudio_neg_prompt',
+        'prompt_enhancer', 'override_attention',
+        'self_refiner_plan', 'output_filename',
+    ]:
+        params.setdefault(_str_param, '')
+    # List params
+    params.setdefault('activated_loras', [])
+    params.setdefault('perturbation_layers', [])
+
+    task = {"params": params, "state": state, "gen": state["gen"]}
+
+    # Capture error messages sent via send_cmd("error", ...) so they can be
+    # surfaced to the API caller instead of silently returning null.
+    captured_error = [None]
+    def capturing_send_cmd(cmd, data=None):
+        if cmd == "error" and data is not None:
+            captured_error[0] = str(data)
+
+    # v11.26+ requires 90+ positional/keyword arguments.
+    # We dynamically map our params dict to the function signature.
+    import inspect
+    sig = inspect.signature(generate_video)
+    call_args = {}
+
+    for name, param in sig.parameters.items():
+        if name == "task":
+            call_args[name] = task
+        elif name == "send_cmd":
+            call_args[name] = capturing_send_cmd
+        elif name == "state":
+            call_args[name] = state
+        elif name == "model_type":
+            call_args[name] = model_type
+        elif name == "mode":
+            call_args[name] = params.get("mode", "t2v")
+        elif name in params:
+            call_args[name] = params[name]
+        elif param.default is not inspect.Parameter.empty:
+            call_args[name] = param.default
+        else:
+            # Safe defaults for required positional arguments missing in params
+            if name in ["client_id", "output_filename"]:
+                call_args[name] = ""
+            elif any(x in name for x in ["steps", "seed", "strength", "guidance", "frames", "size", "overlap", "intensity", "scale", "tau", "alpha", "ratio", "amplitude"]):
+                call_args[name] = 0
+            elif any(x in name for x in ["attention", "layers", "phases"]):
+                call_args[name] = []
+            elif "switch" in name or "enabled" in name or "mode" in name or "upsampling" in name:
+                call_args[name] = False
+            else:
+                call_args[name] = None
+
+    # Handle special case for client_id which is often required but empty for API
+    if "client_id" in call_args and call_args["client_id"] is None:
+        call_args["client_id"] = ""
+
+    result_path = generate_video(**call_args)
+
+    # Image mode returns a list of paths (one per frame); take the first one.
+    if isinstance(result_path, list):
+        print(f"[API /generate] List contents: {result_path}")
+        if len(result_path) > 0:
+            result_path = result_path[0]
+
+    if isinstance(result_path, str):
+        print(f"[API /generate] Path exists: {os.path.exists(result_path)} — {result_path}")
+
+    if result_path and isinstance(result_path, str) and os.path.exists(result_path):
+        def delayed_delete(path, delay=300):
+            time.sleep(delay)
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+                    print(f"Cleaned up API output: {path}")
+            except: pass
+        import threading
+        threading.Thread(target=delayed_delete, args=(result_path,), daemon=True).start()
+        return result_path
+
+    # Generation produced no output — raise a proper error so the client
+    # receives a meaningful message instead of a silent null result.
+    error_msg = captured_error[0] or "Generation failed: no output produced. Check server logs for details."
+    print(f"[API /generate] Raising error to client: {error_msg}")
+    raise gr.Error(error_msg)
+
+def api_unload_handler():
+    release_model()
+    return "Models stored in RAM have been released"
 
 
 def validate_task(task, state):
@@ -8855,12 +9244,14 @@ def all_letters(source_str, letters):
     return True    
 
 def any_letters(source_str, letters):
+    source_str = source_str or ""
     for letter in letters:
         if letter in source_str:
             return True
     return False
 
 def filter_letters(source_str, letters, default= ""):
+    source_str = source_str or ""
     ret = ""
     for letter in letters:
         if letter in source_str:
@@ -8870,12 +9261,12 @@ def filter_letters(source_str, letters, default= ""):
     return ret    
 
 def add_to_sequence(source_str, letters):
+    source_str = source_str or ""
     ret = source_str
     for letter in letters:
         if not letter in source_str:
             ret += letter
-    return ret    
-
+    return ret
 def del_in_sequence(source_str, letters):
     ret = source_str
     for letter in letters:
@@ -11535,6 +11926,7 @@ def create_ui():
     css_path = os.path.join(os.path.dirname(__file__), "shared", "gradio", "ui_styles.css")
     with open(css_path, "r", encoding="utf-8") as f:
         css = f.read()
+    css += "\n#api_container { display: none !important; }\n"
     css += "\n" + assistant_chat.get_css()
     UI_theme = server_config.get("UI_theme", "default")
     UI_theme  = args.theme if len(args.theme) > 0 else UI_theme
@@ -11575,6 +11967,82 @@ def create_ui():
         with gr.Tabs(selected="video_gen", ) as main_tabs:
             # JS keepalive patch targets the stable Gradio tab id "video_gen"; the label can change, but if this id changes the patch must be updated too.
             with gr.Tab("Video Generator", id="video_gen") as video_generator_tab:
+                # --------------------------------------------------------------------------
+                # API Endpoints (Visible to server for discovery, hidden from UI via CSS)
+                # --------------------------------------------------------------------------
+                with gr.Group(elem_id="api_container"):
+                    # 1. Main Generation API
+                    api_gen_model_type = gr.Textbox(label="Model Type")
+                    api_gen_prompt = gr.Textbox(label="Prompt")
+                    api_gen_steps = gr.Number(label="Steps")
+                    api_gen_guidance = gr.Number(label="Guidance")
+                    api_gen_resolution = gr.Textbox(label="Resolution")
+                    api_gen_length = gr.Textbox(label="Length")
+                    api_gen_seed = gr.Number(label="Seed")
+                    api_gen_image_mode = gr.Checkbox(label="Image Mode")
+                    api_gen_denoising = gr.Number(label="Denoising")
+                    api_gen_image_start = gr.Textbox(label="Image Start")
+                    api_gen_audio_input = gr.Textbox(label="Audio Input")
+                    api_gen_override_profile = gr.Number(label="Override Profile")
+                    api_gen_masking_strength = gr.Number(label="Masking Strength")
+                    api_gen_btn = gr.Button("Generate API")
+                    api_gen_output = gr.File(label="Output")
+
+                    api_gen_btn.click(
+                        fn=api_endpoint_handler,
+                        inputs=[
+                            api_gen_model_type, api_gen_prompt, api_gen_steps, api_gen_guidance,
+                            api_gen_resolution, api_gen_length, api_gen_seed, api_gen_image_mode,
+                            api_gen_denoising, api_gen_image_start, api_gen_audio_input,
+                            api_gen_override_profile, api_gen_masking_strength
+                        ],
+                        outputs=api_gen_output,
+                        api_name="generate"
+                    )
+
+                    # 2. Unload API
+                    api_unload_btn = gr.Button("Unload API")
+                    api_unload_output = gr.Textbox(label="Unload Status")
+                    api_unload_btn.click(fn=api_unload_handler, inputs=[], outputs=api_unload_output, api_name="unload")
+
+                    # 2b. Resource Status API
+                    api_res_btn = gr.Button("Resource Status API")
+                    api_res_output = gr.JSON(label="Resource Status")
+                    api_res_btn.click(fn=_resource_status, inputs=[], outputs=api_res_output, api_name="resource_status")
+
+                    # 3. Render Video API
+                    api_render_payload = gr.JSON(label="Render Payload")
+                    api_render_btn = gr.Button("Render API")
+                    api_render_output = gr.JSON(label="Render Output")
+
+                    def render_video_gradio_api(data):
+                        from workflow_endpoints import render_video_task
+                        import uuid, os, threading, json
+                        if isinstance(data, str):
+                            try: data = json.loads(data)
+                            except: return {"status": "failed", "error": "Invalid JSON string"}
+                        if not isinstance(data, dict):
+                            return {"status": "failed", "error": "Payload must be a dictionary"}
+                        execution_id = data.get("execution_id", str(uuid.uuid4()))
+                        output_path = os.path.join("outputs", f"render_{execution_id}.mp4")
+                        os.makedirs("outputs", exist_ok=True)
+                        threading.Thread(target=render_video_task, args=(data, output_path, execution_id), daemon=True).start()
+                        return {"status": "queued", "execution_id": execution_id, "output_url": f"/file={output_path}"}
+
+                    api_render_btn.click(fn=render_video_gradio_api, inputs=[api_render_payload], outputs=api_render_output, api_name="render_video")
+
+                    # 4. Render Status API
+                    api_status_id = gr.Textbox(label="Status ID")
+                    api_status_btn = gr.Button("Status API")
+                    api_status_output = gr.JSON(label="Status Output")
+
+                    def render_status_gradio_api(eid):
+                        from workflow_endpoints import executions
+                        return executions.get(eid, {"error": "Execution ID not found"})
+
+                    api_status_btn.click(fn=render_status_gradio_api, inputs=[api_status_id], outputs=api_status_output, api_name="render_status")
+                # --------------------------------------------------------------------------
+
                 with gr.Row():
                     if args.lock_model:    
                         gr.Markdown("<div class='title-with-lines'><div class=line></div><h2>" + get_model_name(transformer_type) + "</h2><div class=line></div>")
@@ -11704,6 +12172,83 @@ def create_ui():
             app.setup_ui_tabs(main_tabs, state, generator_tab_components["set_save_form_event"])
         if stats_app is not None:
             stats_app.setup_events(main, state)
+
+        # --------------------------------------------------------------------------
+        # API Endpoints (Visible to server for discovery, hidden from UI via CSS)
+        # --------------------------------------------------------------------------
+        with gr.Group(elem_id="api_container"):
+            # 1. Main Generation API
+            api_gen_model_type = gr.Textbox(label="Model Type")
+            api_gen_prompt = gr.Textbox(label="Prompt")
+            api_gen_steps = gr.Number(label="Steps")
+            api_gen_guidance = gr.Number(label="Guidance")
+            api_gen_resolution = gr.Textbox(label="Resolution")
+            api_gen_length = gr.Textbox(label="Length")
+            api_gen_seed = gr.Number(label="Seed")
+            api_gen_image_mode = gr.Checkbox(label="Image Mode")
+            api_gen_denoising = gr.Number(label="Denoising")
+            api_gen_image_start = gr.Textbox(label="Image Start")
+            api_gen_audio_input = gr.Textbox(label="Audio Input")
+            api_gen_override_profile = gr.Number(label="Override Profile")
+            api_gen_masking_strength = gr.Number(label="Masking Strength")
+            api_gen_btn = gr.Button("Generate API")
+            api_gen_output = gr.File(label="Output")
+
+            api_gen_btn.click(
+                fn=api_endpoint_handler,
+                inputs=[
+                    api_gen_model_type, api_gen_prompt, api_gen_steps, api_gen_guidance,
+                    api_gen_resolution, api_gen_length, api_gen_seed, api_gen_image_mode,
+                    api_gen_denoising, api_gen_image_start, api_gen_audio_input,
+                    api_gen_override_profile, api_gen_masking_strength
+                ],
+                outputs=api_gen_output,
+                api_name="generate"
+            )
+
+            # 2. Unload API
+            api_unload_btn = gr.Button("Unload API")
+            api_unload_output = gr.Textbox(label="Unload Status")
+            api_unload_btn.click(fn=api_unload_handler, inputs=[], outputs=api_unload_output, api_name="unload")
+
+            # 2b. Resource Status API
+            api_res_btn = gr.Button("Resource Status API")
+            api_res_output = gr.JSON(label="Resource Status")
+            api_res_btn.click(fn=_resource_status, inputs=[], outputs=api_res_output, api_name="resource_status")
+
+            # 3. Render Video API
+            api_render_payload = gr.JSON(label="Render Payload")
+            api_render_btn = gr.Button("Render API")
+            api_render_output = gr.JSON(label="Render Output")
+
+            def render_video_gradio_api(data):
+                from workflow_endpoints import render_video_task
+                import uuid, os, threading, json
+                if isinstance(data, str):
+                    try: data = json.loads(data)
+                    except: return {"status": "failed", "error": "Invalid JSON string"}
+                if not isinstance(data, dict):
+                    return {"status": "failed", "error": "Payload must be a dictionary"}
+                execution_id = data.get("execution_id", str(uuid.uuid4()))
+                output_path = os.path.join("outputs", f"render_{execution_id}.mp4")
+                os.makedirs("outputs", exist_ok=True)
+                threading.Thread(target=render_video_task, args=(data, output_path, execution_id), daemon=True).start()
+                return {"status": "queued", "execution_id": execution_id, "output_url": f"/file={output_path}"}
+
+            api_render_btn.click(fn=render_video_gradio_api, inputs=[api_render_payload], outputs=api_render_output, api_name="render_video")
+
+            # 4. Render Status API
+            api_status_id = gr.Textbox(label="Status ID")
+            api_status_btn = gr.Button("Status API")
+            api_status_output = gr.JSON(label="Status Output")
+
+            def render_status_gradio_api(eid):
+                from workflow_endpoints import executions
+                return executions.get(eid, {"error": "Execution ID not found"})
+
+            api_status_btn.click(fn=render_status_gradio_api, inputs=[api_status_id], outputs=api_status_output, api_name="render_status")
+        # --------------------------------------------------------------------------
+
         return main
 
 def clear_startup_lock():
@@ -11938,10 +12483,19 @@ if __name__ == "__main__":
         else:
             url = "http://" + server_name
         webbrowser.open(url + ":" + str(server_port), new = 0, autoraise = True)
-    demo.launch(
+    app, local_url, share_url = demo.launch(
         favicon_path="favicon.png",
         server_name=server_name,
         server_port=server_port,
         share=args.share,
+        root_path=args.root_path,
+        show_api=True,
         allowed_paths=list({save_path, image_save_path, audio_save_path, "icons"}),
+        prevent_thread_lock=True
     )
+    
+    # Mount custom workflow endpoints
+    setup_workflow_endpoints(app)
+    print(f"Workflow endpoints mounted on {local_url}")
+    
+    demo.block_thread()
