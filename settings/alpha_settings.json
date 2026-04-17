@@ -1,0 +1,7 @@
+{
+    "settings_version": 2.53,
+    "prompt": "A large orange octopus is seen resting. The background of the video is transparent.",
+    "resolution": "832x480",
+    "flow_shift": 5.0,
+    "sample_solver": "unipc"
+}

@@ -1,0 +1,16 @@
+{
+    "settings_version": 2.53,
+    "prompt": "A singer in a glittering jacket grips the microphone, sweat shining on his brow, and shouts, <S>The end is night<E>. The crowd roars in response, fists in the air. Behind him, a guitarist steps to the mic and adds to say <S>We must all find a bunker where to hide.<E>. The energy peaks as the lights flare brighter.. <AUDCAP>Electric guitar riffs, cheering crowd, shouted male voices.<ENDAUDCAP>",
+    "resolution": "832x480",
+    "flow_shift": 5.0,
+    "sample_solver": "unipc",
+    "guidance_scale": 4.0,
+    "audio_guidance_scale": 3.0,
+    "num_inference_steps": 30,
+    "perturbation_switch": 1,
+    "sliding_window_size": 121,
+    "video_length": 121,
+    "perturbation_layers": [
+        11
+    ]
+}
