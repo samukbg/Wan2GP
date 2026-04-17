@@ -15,10 +15,10 @@ import random
 import ffmpeg
 import os
 import tempfile
-import subprocess
-import json
 import time
 from functools import lru_cache
+from .video_decode import probe_video_stream_metadata, video_needs_corrected_decode, decode_video_frames_ffmpeg, get_video_summary_extras
+from .virtual_media import parse_virtual_media_path, strip_virtual_media_suffix
 os.environ["U2NET_HOME"] = os.path.join(os.getcwd(), "ckpts", "rembg")
 
 
@@ -34,22 +34,25 @@ def seed_everything(seed: int):
         torch.mps.manual_seed(seed)
 
 def has_video_file_extension(filename):
+    filename = strip_virtual_media_suffix(filename)
     extension = os.path.splitext(filename)[-1].lower()
     return extension in [".mp4", ".mkv"]
 
 def has_image_file_extension(filename):
+    filename = strip_virtual_media_suffix(filename)
     extension = os.path.splitext(filename)[-1].lower()
     return extension in [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".jfif", ".pjpeg"]
 
 def has_audio_file_extension(filename):
+    filename = strip_virtual_media_suffix(filename)
     extension = os.path.splitext(filename)[-1].lower()
     return extension in [".wav", ".mp3", ".aac"]
 
 def resample(video_fps, video_frames_count, max_target_frames_count, target_fps, start_target_frame ):
     import math
 
-    video_frame_duration = 1 /video_fps
-    target_frame_duration = 1 / target_fps 
+    video_frame_duration = 1 /round(video_fps, 0)
+    target_frame_duration = 1 / round(target_fps, 0) 
     
     target_time = start_target_frame * target_frame_duration
     frame_no = math.ceil(target_time / video_frame_duration)  
@@ -157,32 +160,138 @@ def process_images_multithread(image_processor, items, process_type, wrap_in_lis
     # print(f"duration:{end_time-start_time:.1f}")
 
     return results
+
+def get_resampled_video_transparent(video_in, start_frame, max_frames, target_fps, bridge='torch'):
+    virtual_spec = parse_virtual_media_path(video_in) if isinstance(video_in, str) else None
+    base_video_in = strip_virtual_media_suffix(video_in) if isinstance(video_in, str) else video_in
+    if isinstance(base_video_in, str) and has_image_file_extension(base_video_in):
+        video_in = Image.open(base_video_in)
+    if isinstance(video_in, Image.Image):
+        frame = torch.from_numpy(np.array(video_in).astype(np.uint8)).unsqueeze(0)
+        return frame if bridge == "torch" else frame.numpy()
+    if virtual_spec is None and isinstance(video_in, str) and not video_needs_corrected_decode(video_in):
+        decord.bridge.set_bridge(bridge)
+        reader = decord.VideoReader(video_in)
+        fps = round(reader.get_avg_fps())
+        if max_frames < 0:
+            max_frames = int(max(len(reader) / fps * target_fps + max_frames, 0))
+        frame_nos = resample(fps, len(reader), max_target_frames_count=max_frames, target_fps=target_fps, start_target_frame=start_frame)
+        return reader.get_batch(frame_nos)
+    metadata = probe_video_stream_metadata(video_in)
+    fps_float = metadata["fps_float"] if metadata is not None else 0.0
+    if max_frames < 0:
+        max_frames = int(max((metadata["frame_count"] / fps_float) * target_fps + max_frames, 0)) if metadata is not None and fps_float > 0 else 0
+    return decode_video_frames_ffmpeg(video_in, start_frame, max_frames, target_fps=target_fps, bridge=bridge)
+
+
 @lru_cache(maxsize=100)
-def get_video_info(video_path):
+def _get_video_info_cached(video_path):
+    metadata = probe_video_stream_metadata(video_path)
+    if metadata is not None:
+        return metadata["fps"], metadata["display_width"], metadata["display_height"], metadata["frame_count"]
     global video_info_cache
     import cv2
     cap = cv2.VideoCapture(video_path)
-    
-    # Get FPS
     fps = round(cap.get(cv2.CAP_PROP_FPS))
-    
-    # Get resolution
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) 
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()
-    
     return fps, width, height, frame_count
+
+
+def get_video_info(video_path):
+    if isinstance(video_path, Image.Image):
+        width, height = video_path.size
+        return 1, width, height, 1
+    return _get_video_info_cached(video_path)
+
+
+@lru_cache(maxsize=100)
+def _get_video_info_details_cached(video_path):
+    metadata = probe_video_stream_metadata(video_path)
+    if metadata is not None:
+        return metadata
+    fps, width, height, frame_count = get_video_info(video_path)
+    return {
+        "source_path": strip_virtual_media_suffix(video_path),
+        "width": width,
+        "height": height,
+        "display_width": width,
+        "display_height": height,
+        "fps_float": float(fps),
+        "fps": int(fps),
+        "frame_count": int(frame_count),
+        "duration": float(frame_count / fps) if fps > 0 else 0.0,
+        "sample_aspect_ratio": "1:1",
+        "display_aspect_ratio": "",
+        "color_transfer": "",
+        "color_primaries": "",
+        "color_space": "",
+        "color_range": "",
+        "needs_sar_fix": False,
+        "needs_tonemap": False,
+    }
+
+
+def get_video_info_details(video_path):
+    if isinstance(video_path, Image.Image):
+        width, height = video_path.size
+        return {
+            "source_path": "",
+            "width": width,
+            "height": height,
+            "display_width": width,
+            "display_height": height,
+            "fps_float": 1.0,
+            "fps": 1,
+            "frame_count": 1,
+            "duration": 1.0,
+            "sample_aspect_ratio": "1:1",
+            "display_aspect_ratio": "",
+            "color_transfer": "",
+            "color_primaries": "",
+            "color_space": "",
+            "color_range": "",
+            "needs_sar_fix": False,
+            "needs_tonemap": False,
+        }
+    return _get_video_info_details_cached(video_path)
 
 def get_video_frame(file_name: str, frame_no: int, return_last_if_missing: bool = False, target_fps = None,  return_PIL = True) -> torch.Tensor:
     """Extract nth frame from video as PyTorch tensor normalized to [-1, 1]."""
-    cap = cv2.VideoCapture(file_name)
+    metadata = probe_video_stream_metadata(file_name)
+    if metadata is not None and (metadata["needs_sar_fix"] or metadata["needs_tonemap"]):
+        fps_float = metadata["fps_float"] if metadata["fps_float"] > 0 else float(metadata["fps"] or 1)
+        if target_fps is not None and float(target_fps) > 0:
+            max_target_frames = int(round(metadata["frame_count"] / fps_float * float(target_fps))) if metadata["frame_count"] > 0 else 0
+            if return_last_if_missing and max_target_frames > 0:
+                frame_no = min(max(0, int(frame_no)), max_target_frames - 1)
+            frames = decode_video_frames_ffmpeg(file_name, int(frame_no), 1, target_fps=float(target_fps), bridge="torch")
+        else:
+            if return_last_if_missing and metadata["frame_count"] > 0:
+                frame_no = min(max(0, int(frame_no)), metadata["frame_count"] - 1)
+            frames = decode_video_frames_ffmpeg(file_name, int(frame_no), 1, target_fps=None, bridge="torch")
+        if frames.shape[0] == 0:
+            raise ValueError(f"Failed to read frame {frame_no}")
+        frame = frames[0]
+        if return_PIL:
+            return Image.fromarray(frame.numpy())
+        return frame.permute(2, 0, 1).float().div_(127.5).sub_(1.0)
+    virtual_spec = parse_virtual_media_path(file_name)
+    base_file_name = strip_virtual_media_suffix(file_name)
+    cap = cv2.VideoCapture(base_file_name)
     
     if not cap.isOpened():
         raise ValueError(f"Cannot open video: {file_name}")
     
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = round(cap.get(cv2.CAP_PROP_FPS))
+    virtual_start = 0
+    if virtual_spec is not None and total_frames > 0:
+        virtual_start = max(0, min(int(virtual_spec.start_frame), total_frames - 1))
+        virtual_end = total_frames - 1 if virtual_spec.end_frame is None else max(virtual_start, min(int(virtual_spec.end_frame), total_frames - 1))
+        total_frames = max(0, virtual_end - virtual_start + 1)
     if target_fps is not None:
         frame_no = round(target_fps * frame_no /fps)
 
@@ -195,7 +304,7 @@ def get_video_frame(file_name: str, frame_no: int, return_last_if_missing: bool 
             raise IndexError(f"Frame {frame_no} out of bounds (0-{total_frames-1})")
     
     # Get frame
-    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, virtual_start + frame_no)
     ret, frame = cap.read()
     cap.release()
     
@@ -291,10 +400,10 @@ def get_outpainting_dims(video_guide_outpainting, video_guide_outpainting_ratio 
     if video_guide_outpainting is None:
         return None
     video_guide_outpainting = str(video_guide_outpainting).strip()
-    if video_guide_outpainting.startswith("#"):
+    if video_guide_outpainting.startswith("#") :
         return None
-    if len(video_guide_outpainting) == 0 or video_guide_outpainting == "0 0 0 0":
-        return [0, 0, 0, 0] if len((video_guide_outpainting_ratio or "").strip()) > 0 else None
+    if video_guide_outpainting == "0 0 0 0" or len(video_guide_outpainting) == 0:
+        return [0, 0, 0, 0] if len(video_guide_outpainting_ratio) else None
     outpainting_dims = video_guide_outpainting.split(" ")
     return None if len(outpainting_dims) != 4 else [int(v) for v in outpainting_dims]
 

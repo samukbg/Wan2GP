@@ -2,6 +2,7 @@ import subprocess
 import tempfile, os
 import ffmpeg
 import struct
+from typing import Any
 import torchvision.transforms.functional as TF
 import torch.nn.functional as F
 import cv2
@@ -16,6 +17,9 @@ import json
 import numpy as np
 import soundfile as sf
 import zlib
+
+from .video_decode import probe_video_stream_metadata
+from .virtual_media import parse_virtual_media_path, strip_virtual_media_suffix
 
 def rand_name(length=8, suffix=''):
     name = binascii.b2a_hex(os.urandom(length)).decode('utf-8')
@@ -40,6 +44,50 @@ def write_wav_file(path, audio_data, sample_rate):
     audio_array = _prepare_audio_array(audio_data)
     sf.write(path, audio_array, int(sample_rate))
     return path
+
+
+def resample_audio_array(audio_data, source_sample_rate, target_sample_rate):
+    audio_array = np.asarray(audio_data, dtype=np.float32)
+    source_sample_rate = int(source_sample_rate or 0)
+    target_sample_rate = int(target_sample_rate or 0)
+    if audio_array.size == 0 or source_sample_rate <= 0 or target_sample_rate <= 0 or source_sample_rate == target_sample_rate:
+        return audio_array.astype(np.float32, copy=False)
+    import torchaudio.functional as taF
+    wave = torch.from_numpy(audio_array.T.copy() if audio_array.ndim == 2 else audio_array[None].copy()).to(dtype=torch.float32)
+    resampled = taF.resample(wave, source_sample_rate, target_sample_rate).cpu().numpy()
+    return (resampled.T if audio_array.ndim == 2 else resampled[0]).astype(np.float32, copy=False)
+
+
+def append_sliding_window_audio(existing_audio_data, existing_audio_path, generated_audio, audio_sampling_rate, committed_audio_samples, existing_audio_sample_rate=None):
+    generated_audio = np.asarray(generated_audio, dtype=np.float32)
+    if generated_audio.size == 0:
+        return generated_audio
+    prefix_sample_rate = int(existing_audio_sample_rate or audio_sampling_rate)
+    if existing_audio_data is not None:
+        prefix_audio = np.asarray(existing_audio_data, dtype=np.float32)
+    elif existing_audio_path:
+        prefix_audio, prefix_sample_rate = sf.read(os.fspath(existing_audio_path), dtype="float32", always_2d=generated_audio.ndim == 2)
+    else:
+        return generated_audio
+    if prefix_sample_rate != int(audio_sampling_rate):
+        prefix_audio = resample_audio_array(prefix_audio, prefix_sample_rate, audio_sampling_rate)
+    prefix_audio = prefix_audio[:max(0, int(committed_audio_samples))]
+    if prefix_audio.size == 0:
+        return generated_audio
+    if prefix_audio.ndim != generated_audio.ndim:
+        prefix_audio = prefix_audio[:, None] if prefix_audio.ndim == 1 else prefix_audio
+        generated_audio = generated_audio[:, None] if generated_audio.ndim == 1 else generated_audio
+    if prefix_audio.ndim == 2 and prefix_audio.shape[1] != generated_audio.shape[1]:
+        prefix_audio = np.repeat(prefix_audio[:, :1], generated_audio.shape[1], axis=1) if prefix_audio.shape[1] == 1 else prefix_audio[:, :generated_audio.shape[1]]
+    return np.concatenate([prefix_audio, generated_audio], axis=0)
+
+
+def create_silent_wav_file(output_dir=None, duration_seconds=0.0, sample_rate=16000, prefix="null_audio_"):
+    sample_rate = int(sample_rate)
+    num_samples = max(1, int(np.ceil(float(duration_seconds) * sample_rate)))
+    fd, path = tempfile.mkstemp(prefix=prefix, suffix=".wav", dir=output_dir)
+    os.close(fd)
+    return write_wav_file(path, np.zeros(num_samples, dtype=np.float32), sample_rate)
 
 
 def _compute_active_abs_amplitude(audio_data):
@@ -118,6 +166,24 @@ def get_mp4_audio_codec_settings(codec_key):
     return settings.get(codec_key, settings["aac_128"])
 
 
+def get_video_encode_args(codec_key: str | None, container: str | None) -> list[str]:
+    codec_key = str(codec_key or "libx264_8").strip().lower() or "libx264_8"
+    container = str(container or "mp4").strip().lower() or "mp4"
+    if codec_key == "libx264_8":
+        return ["-c:v", "libx264", "-crf", "23", "-pix_fmt", "yuv420p"]
+    if codec_key == "libx264_10":
+        return ["-c:v", "libx264", "-crf", "21", "-pix_fmt", "yuv420p"]
+    if codec_key == "libx265_28":
+        return ["-c:v", "libx265", "-crf", "28", "-pix_fmt", "yuv420p", "-x265-params", "log-level=none"]
+    if codec_key == "libx265_8":
+        return ["-c:v", "libx265", "-crf", "8", "-pix_fmt", "yuv420p", "-x265-params", "log-level=none"]
+    if codec_key == "libx264_lossless":
+        if container == "mkv":
+            return ["-c:v", "ffv1", "-pix_fmt", "rgb24"]
+        return ["-c:v", "libx264", "-crf", "0", "-pix_fmt", "yuv444p"]
+    return ["-c:v", "libx264", "-crf", "23", "-pix_fmt", "yuv420p"]
+
+
 def get_audio_codec_extension(codec_key):
     return _get_audio_codec_settings(codec_key)["ext"]
 
@@ -155,117 +221,43 @@ def save_audio_file(path, audio_data, sample_rate, codec_key="wav"):
     return path
 
 
-def _extract_path(p):
-    if not p:
-        return None
-    
-    # Handle dictionary (Gradio FileData)
-    if isinstance(p, dict):
-        return p.get('path', str(p))
-    
-    # Handle string that might be a stringified dictionary or JSON list
-    if isinstance(p, str):
-        p_strip = p.strip()
-        if (p_strip.startswith('{') and p_strip.endswith('}')) or (p_strip.startswith('[') and p_strip.endswith(']')):
-            import json
-            try:
-                # Try JSON first
-                data = json.loads(p_strip.replace("'", '"')) # Simple fix for Python repr vs JSON
-                if isinstance(data, dict):
-                    return data.get('path', p)
-                if isinstance(data, list) and len(data) > 0:
-                    first = data[0]
-                    if isinstance(first, dict):
-                        return first.get('path', p)
-                    return str(first)
-            except:
-                # If JSON fails, it might be a Python repr string
-                try:
-                    import ast
-                    data = ast.literal_eval(p_strip)
-                    if isinstance(data, dict):
-                        return data.get('path', p)
-                    if isinstance(data, list) and len(data) > 0:
-                        first = data[0]
-                        if isinstance(first, dict):
-                            return first.get('path', p)
-                        return str(first)
-                except:
-                    pass
-    return p
-
-
-def _ensure_audio_extension(p):
-    if not p or not os.path.isfile(p):
-        return p
-    
-    basename = os.path.basename(p)
-    _, current_ext = os.path.splitext(p)
-    
-    # If it already has a meaningful extension and is not just 'blob', keep it
-    if current_ext and len(current_ext) > 1 and basename != 'blob':
-        return p
-        
-    import shutil
-    # 1. Try probing with FFmpeg (most reliable)
-    try:
-        import ffmpeg
-        probe = ffmpeg.probe(p)
-        fmt = probe.get('format', {}).get('format_name', '').split(',')[0].lower()
-        ext_map = {
-            'wav': '.wav', 'mp3': '.mp3', 'flac': '.flac', 
-            'aac': '.aac', 'mov': '.mp4', 'mp4': '.mp4', 
-            'ogg': '.ogg', 'webm': '.webm', 'matroska': '.webm'
-        }
-        for k, v in ext_map.items():
-            if k in fmt:
-                fd, tmp = tempfile.mkstemp(suffix=v, prefix='fixed_blob_')
-                os.close(fd)
-                shutil.copy2(p, tmp)
-                return tmp
-    except:
-        pass
-
-    # 2. Fallback to strict magic bytes if probe fails
-    try:
-        with open(p, 'rb') as f:
-            header = f.read(32)
-            ext = None
-            if header.startswith(b'RIFF') and b'WAVE' in header: ext = '.wav'
-            elif header.startswith(b'fLaC'): ext = '.flac'
-            elif b'ftyp' in header: ext = '.mp4'
-            elif header.startswith(b'OggS'): ext = '.ogg'
-            elif header.startswith(b'\x1a\x45\xdf\xa3'): ext = '.webm'
-            elif header.startswith(b'ID3'): ext = '.mp3'
-            
-            if ext:
-                fd, tmp = tempfile.mkstemp(suffix=ext, prefix='fixed_blob_')
-                os.close(fd)
-                shutil.copy2(p, tmp)
-                return tmp
-    except:
-        pass
-    
-    # 3. If everything fails, return as-is. Don't risk a wrong extension.
-    return p
+def _resolve_virtual_audio_segment(video_path: str) -> tuple[str, dict[str, Any], int]:
+    if isinstance(video_path, Image.Image):
+        return "", {}, 0
+    spec = parse_virtual_media_path(video_path)
+    source_path = os.fspath(strip_virtual_media_suffix(video_path))
+    time_args: dict[str, Any] = {}
+    if spec is None:
+        return source_path, time_args, 0
+    metadata = probe_video_stream_metadata(video_path)
+    if metadata is not None and metadata.get("virtual_end_frame") is not None:
+        start_frame = int(metadata.get("virtual_start_frame") or 0)
+        end_frame = int(metadata.get("virtual_end_frame") or start_frame)
+        fps_float = float(metadata.get("fps_float") or metadata.get("fps") or 0.0)
+        if fps_float > 0:
+            time_args["ss"] = max(0.0, start_frame / fps_float)
+            time_args["to"] = max(time_args["ss"], (end_frame + 1) / fps_float)
+    audio_track_no = 1 if spec.audio_track_no is None else max(1, int(spec.audio_track_no))
+    return source_path, time_args, audio_track_no - 1
 
 
 def extract_audio_track_to_wav(video_path, output_path):
     if not video_path:
         return None
+    if isinstance(video_path, Image.Image):
+        return None
     video_path = os.fspath(video_path)
-    
-    # Handle extensionless blob files
-    fixed_path = _ensure_audio_extension(video_path)
-    
+    source_path, time_args, audio_track_index = _resolve_virtual_audio_segment(video_path)
     import ffmpeg
     try:
-        ffmpeg.input(fixed_path).output(output_path, **{"map": "0:a:0", "acodec": "pcm_s16le"}).overwrite_output().run(quiet=True)
-    finally:
-        if fixed_path != video_path and os.path.exists(fixed_path):
-            try: os.remove(fixed_path)
-            except: pass
-            
+        output_kwargs = {"map": f"0:a:{audio_track_index}", "acodec": "pcm_s16le"}
+        ffmpeg.input(source_path, **time_args).output(output_path, **output_kwargs).overwrite_output().run(quiet=True)
+    except ffmpeg.Error as err:
+        stderr = getattr(err, "stderr", b"")
+        if isinstance(stderr, (bytes, bytearray)):
+            stderr = stderr.decode("utf-8", errors="ignore")
+        stderr = (stderr or str(err)).strip()
+        raise RuntimeError(f"ffmpeg audio extract failed for {source_path} -> {output_path}: {stderr}") from err
     return output_path
 
 
@@ -281,72 +273,69 @@ def extract_audio_tracks(source_video, verbose=False, query_only=False, codec_ke
               {'codec', 'sample_rate', 'channels', 'duration', 'language'}
               where 'duration' is set to container duration (for consistency).
     """
-    if not os.path.exists(source_video):
+    if isinstance(source_video, Image.Image):
+        return 0 if query_only else ([], [])
+    source_path, time_args, selected_track_index = _resolve_virtual_audio_segment(source_video)
+    if not os.path.exists(source_path):
         msg = f"ffprobe skipped; file not found: {source_video}"
         if verbose:
             print(msg)
         raise FileNotFoundError(msg)
 
-    # Handle extensionless blob files
-    fixed_path = _ensure_audio_extension(source_video)
-
     try:
-        try:
-            probe = ffmpeg.probe(fixed_path)
-        except ffmpeg.Error as err:
-            stderr = getattr(err, 'stderr', b'')
-            if isinstance(stderr, (bytes, bytearray)):
-                stderr = stderr.decode('utf-8', errors='ignore')
-            stderr = (stderr or str(err)).strip()
-            message = f"ffprobe failed for {fixed_path}: {stderr}"
-            if verbose:
-                print(message)
-            raise RuntimeError(message) from err
-        audio_streams = [s for s in probe['streams'] if s['codec_type'] == 'audio']
-        container_duration = float(probe['format'].get('duration', 0.0))
-
-        if not audio_streams:
-            if query_only: return 0
-            if verbose: print(f"No audio track found in {fixed_path}")
-            return [], []
-
-        if query_only:
-            return len(audio_streams)
-
+        probe = ffmpeg.probe(source_path)
+    except ffmpeg.Error as err:
+        stderr = getattr(err, 'stderr', b'')
+        if isinstance(stderr, (bytes, bytearray)):
+            stderr = stderr.decode('utf-8', errors='ignore')
+        stderr = (stderr or str(err)).strip()
+        message = f"ffprobe failed for {source_path}: {stderr}"
         if verbose:
-            print(f"Found {len(audio_streams)} audio track(s), container duration = {container_duration:.3f}s")
+            print(message)
+        raise RuntimeError(message) from err
+    audio_streams = [s for s in probe['streams'] if s['codec_type'] == 'audio']
+    container_duration = float(probe['format'].get('duration', 0.0))
+    if selected_track_index is not None:
+        audio_streams = [audio_streams[selected_track_index]] if 0 <= selected_track_index < len(audio_streams) else []
 
-        file_paths = []
-        metadata = []
-        if temp_format == "wav":
-            audio_settings = {"codec": "pcm_s16le", "bitrate": None, "ext": ".wav"}
-        else:
-            audio_settings = get_mp4_audio_codec_settings(codec_key)
+    if not audio_streams:
+        if query_only: return 0
+        if verbose: print(f"No audio track found in {source_video}")
+        return [], []
 
-        for i, stream in enumerate(audio_streams):
-            fd, temp_path = tempfile.mkstemp(suffix=f'_track{i}{audio_settings["ext"]}', prefix='audio_')
-            os.close(fd)
+    if query_only:
+        return len(audio_streams)
 
-            file_paths.append(temp_path)
-            metadata.append({
-                'codec': stream.get('codec_name'),
-                'sample_rate': int(stream.get('sample_rate', 0)),
-                'channels': int(stream.get('channels', 0)),
-                'duration': container_duration,
-                'language': stream.get('tags', {}).get('language', None)
-            })
+    if verbose:
+        print(f"Found {len(audio_streams)} audio track(s), container duration = {container_duration:.3f}s")
 
-            output_kwargs = {f'map': f'0:a:{i}', 'acodec': audio_settings["codec"]}
-            if audio_settings["bitrate"]:
-                output_kwargs['b:a'] = audio_settings["bitrate"]
-            
-            ffmpeg.input(fixed_path).output(temp_path, **output_kwargs).overwrite_output().run(quiet=not verbose)
+    file_paths = []
+    metadata = []
+    if temp_format == "wav":
+        audio_settings = {"codec": "pcm_s16le", "bitrate": None, "ext": ".wav"}
+    else:
+        audio_settings = get_mp4_audio_codec_settings(codec_key)
 
-        return file_paths, metadata
-    finally:
-        if fixed_path != source_video and os.path.exists(fixed_path):
-            try: os.remove(fixed_path)
-            except: pass
+    for i, stream in enumerate(audio_streams):
+        fd, temp_path = tempfile.mkstemp(suffix=f'_track{i}{audio_settings["ext"]}', prefix='audio_')
+        os.close(fd)
+
+        file_paths.append(temp_path)
+        metadata.append({
+            'codec': stream.get('codec_name'),
+            'sample_rate': int(stream.get('sample_rate', 0)),
+            'channels': int(stream.get('channels', 0)),
+            'duration': container_duration,
+            'language': stream.get('tags', {}).get('language', None)
+        })
+
+        stream_index = i if selected_track_index is None else selected_track_index
+        output_kwargs = {f'map': f'0:a:{stream_index}', 'acodec': audio_settings["codec"]}
+        if audio_settings["bitrate"]:
+            output_kwargs['b:a'] = audio_settings["bitrate"]
+        ffmpeg.input(source_path, **time_args).output(temp_path, **output_kwargs).overwrite_output().run(quiet=not verbose)
+
+    return file_paths, metadata
 
 
 
@@ -359,24 +348,13 @@ def combine_and_concatenate_video_with_audio_tracks(
     audio_codec_key="aac_128",
     verbose = False
 ):
-    import shutil
-    temp_files_to_cleanup = []
-
-    def fix_path(p):
-        fixed = _ensure_audio_extension(p)
-        if fixed != p:
-            temp_files_to_cleanup.append(fixed)
-            if verbose: print(f"Fixed extensionless path {p} to {fixed}")
-        return fixed
-
     audio_settings = get_mp4_audio_codec_settings(audio_codec_key)
     audio_codec = audio_settings["codec"]
     audio_bitrate = audio_settings["bitrate"]
-
     inputs, filters, maps, idx = ['-i', video_path], [], ['-map', '0:v'], 1
     metadata_args = []
-    sources = [fix_path(s) for s in (source_audio_tracks or [])]
-    news = [fix_path(n) for n in (new_audio_tracks or [])]
+    sources = source_audio_tracks or []
+    news = new_audio_tracks or []
 
     duplicate_source = len(sources) == 1 and len(news) > 1
     N = len(news) if source_audio_duration == 0 else max(len(sources), len(news)) or 1
@@ -447,13 +425,6 @@ def combine_and_concatenate_video_with_audio_tracks(
         subprocess.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
         raise Exception(f"FFmpeg error: {e.stderr}")
-    finally:
-        for tmp in temp_files_to_cleanup:
-            try:
-                if os.path.exists(tmp):
-                    os.remove(tmp)
-            except:
-                pass
 
 
 def combine_video_with_audio_tracks(target_video, audio_tracks, output_video,
@@ -461,44 +432,30 @@ def combine_video_with_audio_tracks(target_video, audio_tracks, output_video,
     if not audio_tracks:
         if verbose: print("No audio tracks to combine."); return False
 
-    # Handle extensionless blob files
-    fixed_tracks = [_ensure_audio_extension(p) for p in audio_tracks]
-    fixed_video = _ensure_audio_extension(target_video)
+    dur = float(next(s for s in ffmpeg.probe(target_video)['streams']
+                     if s['codec_type'] == 'video')['duration'])
+    if verbose: print(f"Video duration: {dur:.3f}s")
 
-    try:
-        dur = float(next(s for s in ffmpeg.probe(fixed_video)['streams']
-                         if s['codec_type'] == 'video')['duration'])
-        if verbose: print(f"Video duration: {dur:.3f}s")
+    cmd = ['ffmpeg', '-y', '-i', target_video]
+    for path in audio_tracks:
+        cmd += ['-i', path]
 
-        cmd = ['ffmpeg', '-y', '-i', fixed_video]
-        for path in fixed_tracks:
-            cmd += ['-i', path]
+    cmd += ['-map', '0:v']
+    for i in range(len(audio_tracks)):
+        cmd += ['-map', f'{i+1}:a']
 
-        cmd += ['-map', '0:v']
-        for i in range(len(fixed_tracks)):
-            cmd += ['-map', f'{i+1}:a']
+    for i, meta in enumerate(audio_metadata or []):
+        if (lang := meta.get('language')):
+            cmd += ['-metadata:s:a:' + str(i), f'language={lang}']
 
-        for i, meta in enumerate(audio_metadata or []):
-            if (lang := meta.get('language')):
-                metadata_args += ['-metadata:s:a:' + str(i), f'language={lang}']
+    cmd += ['-c:v', 'copy', '-c:a', 'copy', '-t', str(dur), output_video]
 
-        cmd += ['-c:v', 'copy', '-c:a', 'copy', '-t', str(dur), output_video]
-
-        result = subprocess.run(cmd, capture_output=not verbose, text=True)
-        if result.returncode != 0:
-            raise Exception(f"FFmpeg error:\n{result.stderr}")
-        if verbose:
-            print(f"Created {output_video} with {len(audio_tracks)} audio track(s)")
-        return True
-    finally:
-        # Cleanup temporary files
-        if fixed_video != target_video and os.path.exists(fixed_video):
-            try: os.remove(fixed_video)
-            except: pass
-        for i, track in enumerate(fixed_tracks):
-            if track != audio_tracks[i] and os.path.exists(track):
-                try: os.remove(track)
-                except: pass
+    result = subprocess.run(cmd, capture_output=not verbose, text=True)
+    if result.returncode != 0:
+        raise Exception(f"FFmpeg error:\n{result.stderr}")
+    if verbose:
+        print(f"Created {output_video} with {len(audio_tracks)} audio track(s)")
+    return True
 
 
 def cleanup_temp_audio_files(audio_tracks, verbose=False):
@@ -831,3 +788,4 @@ def read_image_metadata(image_path):
             return None
     except Exception as e:
         print(f"Error reading metadata: {e}"); return None
+
