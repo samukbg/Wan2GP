@@ -49,10 +49,14 @@ from shared.attention import get_attention_modes, get_supported_attention_modes
 from shared.utils.utils import truncate_for_filesystem, sanitize_file_name, process_images_multithread, get_default_workers
 from shared.utils.process_locks import acquire_GPU_ressources, release_GPU_ressources, any_GPU_process_running, gen_lock
 from workflow_endpoints import setup_workflow_endpoints
+from shared.deepy.config import get_deepy_default_runtime_config, set_deepy_runtime_config
+from shared.deepy import controller as deepy_controller
+from shared.deepy import cli as deepy_cli
+from shared.deepy import gradio_ui as deepy_gradio_ui
 from shared.loras_migration import migrate_loras_layout
 from huggingface_hub import hf_hub_download, snapshot_download
-from shared.utils import files_locator as fl 
-from shared.gradio.audio_gallery import AudioGallery  
+from shared.utils import files_locator as fl
+from shared.gradio.audio_gallery import AudioGallery
 from shared.utils.self_refiner import normalize_self_refiner_plan, ensure_refiner_list, add_refiner_rule, remove_refiner_rule
 import torch
 import gc
@@ -10763,12 +10767,8 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                         download_lora_btn = gr.Button("Download Lora", scale=1, min_width=10)
 
                 assistant_ui = None
-                assistant_launcher_host = None
-                assistant_panel = None
-                if tab_id == 'generate':
-                    assistant_ui = deepy_gradio_ui.build_deepy_chat_ui(deepy_visible=_deepy.is_available())
-                    assistant_launcher_host = assistant_ui.launcher_host
-                    assistant_panel = assistant_ui.panel
+                assistant_launcher_host = gr.HTML(value="", visible=False)
+                assistant_panel = gr.Column(visible=False)
 
             mode = gr.Text(value="", visible = False)
 
@@ -11061,35 +11061,6 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                 )
             
             set_save_form_event(save_form_trigger.change)
-            if assistant_ui is not None:
-                deepy_gradio_ui.bind_deepy_chat_ui(
-                    assistant_ui,
-                    state=state,
-                    output=output,
-                    last_choice=last_choice,
-                    audio_files_paths=audio_files_paths,
-                    audio_file_selected=audio_file_selected,
-                    selected_video_time_input=selected_video_time_input,
-                    load_queue_trigger=load_queue_trigger,
-                    output_trigger=output_trigger,
-                    abort_client_id=abort_client_id,
-                    handlers=deepy_gradio_ui.DeepyChatHandlers(
-                        prepare_request_context=init_generate,
-                        update_tool_ui_settings=_deepy.update_tool_ui_settings,
-                        store_selected_video_time=_deepy.store_selected_video_time,
-                        ask_ai=_deepy.ask_ai,
-                        enqueue_ai=_deepy.enqueue_ai_while_busy,
-                        stop_ai=_deepy.stop_ai,
-                        reset_ai=_deepy.reset_ai,
-                    ),
-                )
-                main.load(
-                    fn=_deepy.browser_session_started,
-                    inputs=[state],
-                    outputs=[assistant_ui.chat_event, load_queue_trigger, assistant_ui.request, abort_client_id],
-                    queue=False,
-                    show_progress="hidden",
-                )
             gr.on(triggers=[video_info_eject_video_btn.click, video_info_eject_video2_btn.click, video_info_eject_video3_btn.click, video_info_eject_deleted_video_btn.click,  video_info_eject_image_btn.click], fn=eject_video_from_gallery, inputs =[state, output, last_choice], outputs = [output, video_info, video_buttons_row] )
             video_info_to_control_video_btn.click(fn=video_to_control_video, inputs =[state, output, last_choice], outputs = [video_guide] )            
             video_info_to_video_source_btn.click(fn=video_to_source_video, inputs =[state, output, last_choice], outputs = [video_source] )
