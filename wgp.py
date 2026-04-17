@@ -5795,6 +5795,7 @@ def generate_video(
     denoising_strength,
     masking_strength,     
     video_guide_outpainting,
+    video_guide_outpainting_ratio,
     video_mask,
     image_mask,
     control_net_weight,
