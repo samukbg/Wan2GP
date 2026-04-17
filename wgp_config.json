@@ -79,5 +79,9 @@
     "deepy_context_tokens": 16386,
     "deepy_custom_system_prompt": "",
     "deepy_auto_cancel_queue_tasks": true,
-    "deepy_separate_requests_with_empty_line": true
+    "deepy_separate_requests_with_empty_line": true,
+    "enabled_plugins": [
+        "wan2gp-motion-designer"
+    ],
+    "motion_designer_bundled_migrated": 1
 }
