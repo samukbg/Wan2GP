@@ -11724,6 +11724,7 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
         "denoising_strength": 0.5, # Keep the default for other cases, but it will be overridden below for image_mode
         "masking_strength": 1.0,
         "video_guide_outpainting": "#",
+        "video_guide_outpainting_ratio": "",
         "video_mask": None,
         "image_mask": None,
         "control_net_weight": 1.0,
