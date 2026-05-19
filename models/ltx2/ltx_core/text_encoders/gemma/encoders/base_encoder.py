@@ -95,6 +95,19 @@ class GemmaTextEncoderModelBase(torch.nn.Module):
         max_new_tokens: int = 512,
         seed: int = 42,
     ) -> str:
+        # Use remote vLLM by default
+        from shared.prompt_enhancer.prompt_enhance_utils import _generate_remote_vllm_prompt
+        results = _generate_remote_vllm_prompt(
+            [messages],
+            max_new_tokens,
+            temperature=0.7,
+            top_p=0.9,
+            seed=seed,
+        )
+        if results and not results[0].startswith("Error:"):
+            return results[0]
+            
+        # Fallback to local model if remote fails
         if self.processor is None:
             self._init_image_processor()
         text = self.processor.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)

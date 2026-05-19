@@ -284,19 +284,32 @@ def _generate_remote_vllm_prompt(
     import requests
     url = "http://localhost:11434/v1/chat/completions"
     model = "qwen3.6-27b-mtp-gguf"
-    
+
     results = []
     for msg in messages:
+        # Prepare messages for vLLM (ensure they are in the correct format)
+        formatted_messages = []
+        for m in msg:
+            content = m["content"]
+            if isinstance(content, list):
+                # Handle multimodal or complex content by extracting text
+                text_parts = []
+                for part in content:
+                    if part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                content = " ".join(text_parts)
+            formatted_messages.append({"role": m["role"], "content": content})
+
         payload = {
             "model": model,
-            "messages": msg,
+            "messages": formatted_messages,
             "max_tokens": max_new_tokens,
             "temperature": temperature if temperature is not None else 0.6,
             "top_p": top_p if top_p is not None else 0.9,
         }
         if seed is not None:
             payload["seed"] = int(seed)
-            
+
         try:
             response = requests.post(url, json=payload, timeout=60)
             response.raise_for_status()
@@ -306,7 +319,6 @@ def _generate_remote_vllm_prompt(
             logger.error(f"Error calling remote vLLM: {e}")
             results.append(f"Error: could not generate prompt from remote vLLM ({e})")
     return results
-
 def _generate_t2v_prompt(
     prompt_enhancer_model,
     prompt_enhancer_tokenizer,

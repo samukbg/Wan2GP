@@ -5529,7 +5529,7 @@ def process_prompt_enhancer(model_def, prompt_enhancer, original_prompts,  image
         else:
             enhancer_seed = seed if seed is not None and seed >= 0 else 0
         
-        use_remote_vllm = model_type in ["ltx2_22B_distilled", "flux2_klein_9b"]
+        use_remote_vllm = True # model_type in ["ltx2_22B_distilled", "flux2_klein_9b"]
         
         prompts = generate_cinematic_prompt(
             prompt_enhancer_image_caption_model,
