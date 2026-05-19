@@ -54,34 +54,33 @@ _MODEL_REQUIREMENTS: dict[str, dict] = {
     # LTX2 22B family (distilled or not):
     # 25.4 GB observed pinned + 6 GB safety buffer; 8 GB free VRAM minimum.
     "ltx2": {
-        "ram_gb":  float(os.environ.get("WGP_LTX2_MIN_FREE_RAM_GB",  "32.0")),
-        "vram_gb": float(os.environ.get("WGP_LTX2_MIN_FREE_VRAM_GB",  "8.0")),
+        "ram_gb":  0.0,
+        "vram_gb": 0.0,
     },
     # Flux2 family (Klein 4B / 9B, dev, etc.):
-    # 18.0 GB observed + 4 GB safety buffer; 8 GB free VRAM minimum.
     "flux2": {
-        "ram_gb":  float(os.environ.get("WGP_FLUX2_MIN_FREE_RAM_GB",  "22.0")),
-        "vram_gb": float(os.environ.get("WGP_FLUX2_MIN_FREE_VRAM_GB",  "8.0")),
+        "ram_gb":  0.0,
+        "vram_gb": 0.0,
     },
     # Legacy Flux (1.x):
     "flux": {
-        "ram_gb":  float(os.environ.get("WGP_FLUX_MIN_FREE_RAM_GB",   "20.0")),
-        "vram_gb": float(os.environ.get("WGP_FLUX_MIN_FREE_VRAM_GB",   "8.0")),
+        "ram_gb":  0.0,
+        "vram_gb": 0.0,
     },
     # Hunyuan family (large models):
     "hunyuan": {
-        "ram_gb":  float(os.environ.get("WGP_HUNYUAN_MIN_FREE_RAM_GB", "40.0")),
-        "vram_gb": float(os.environ.get("WGP_HUNYUAN_MIN_FREE_VRAM_GB", "8.0")),
+        "ram_gb":  0.0,
+        "vram_gb": 0.0,
     },
     # Wan 14B family:
     "wan": {
-        "ram_gb":  float(os.environ.get("WGP_WAN_MIN_FREE_RAM_GB",    "28.0")),
-        "vram_gb": float(os.environ.get("WGP_WAN_MIN_FREE_VRAM_GB",    "8.0")),
+        "ram_gb":  0.0,
+        "vram_gb": 0.0,
     },
     # Conservative fallback for any unknown model:
     "default": {
-        "ram_gb":  float(os.environ.get("WGP_DEFAULT_MIN_FREE_RAM_GB",  "8.0")),
-        "vram_gb": float(os.environ.get("WGP_DEFAULT_MIN_FREE_VRAM_GB",  "4.0")),
+        "ram_gb":  0.0,
+        "vram_gb": 0.0,
     },
 }
 
