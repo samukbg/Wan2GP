@@ -6,14 +6,34 @@ import requests
 import uuid
 import shutil
 import time
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
+from shared.ffmpeg_setup import download_ffmpeg
 
 router = APIRouter()
 
 # Global dictionary to store execution status
 executions = {}
+
+def ensure_hyperframes_env():
+    """Ensure ffmpeg and chrome are available for hyperframes."""
+    # Ensure ffmpeg is on PATH
+    download_ffmpeg()
+    
+    # Check if chrome is installed for hyperframes
+    # This might take a moment if it's the first time
+    # Run in background to avoid blocking server startup
+    def _ensure():
+        try:
+            print("[Hyperframes] Ensuring browser environment...")
+            subprocess.run(["npx.cmd", "-y", "hyperframes", "browser", "ensure"], check=True, capture_output=True)
+            print("[Hyperframes] Browser environment ready.")
+        except Exception as e:
+            print(f"[Hyperframes] Warning during browser ensure: {e}")
+    
+    import threading
+    threading.Thread(target=_ensure, daemon=True).start()
 
 def download_file(url: str, dest: str):
     print(f"Downloading {url} to {dest}")
@@ -33,6 +53,7 @@ def get_media_info(path: str) -> Dict[str, Any]:
     return json.loads(result.stdout)
 
 def render_video_task(data: Dict[str, Any], output_path: str, execution_id: str):
+    # ... (existing render_video_task code)
     executions[execution_id] = {"status": "processing", "progress": 0}
     
     segments = data.get("segments", [])
@@ -246,5 +267,300 @@ async def get_render_status(execution_id: str):
         return JSONResponse({"error": "Execution ID not found"}, status_code=404)
     return status
 
+def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id: str):
+    executions[execution_id] = {"status": "processing", "progress": 0}
+    
+    html_content = data.get("html")
+    html_url = data.get("html_url")
+    files = data.get("files", {}) # Dictionary of filename -> content (or url)
+    fps = data.get("fps", 30)
+    quality = data.get("quality", "standard")
+    format = data.get("format", "mp4")
+    
+    temp_dir = tempfile.mkdtemp(prefix=f"hyperframes_{execution_id}_")
+    
+    try:
+        ensure_hyperframes_env()
+        executions[execution_id]["progress"] = 5
+        
+        # 1. Prepare index.html
+        index_path = os.path.join(temp_dir, "index.html")
+        if html_url:
+            download_file(html_url, index_path)
+        elif html_content:
+            with open(index_path, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+        else:
+            # Check if index.html is in files
+            if "index.html" not in files:
+                raise ValueError("Either 'html', 'html_url', or 'index.html' in 'files' must be provided")
+            
+        executions[execution_id]["progress"] = 10
+        
+        # 1.5 Inject Smooth Scroll logic for web compositions
+        try:
+            with open(index_path, 'r', encoding='utf-8') as f:
+                html = f.read()
+            
+            smooth_scroll_patch = """
+<style>
+    html { scroll-behavior: smooth !important; }
+    body { 
+        overflow: hidden !important; 
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+    /* Hide all scrollbars */
+    ::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
+    * { 
+        -ms-overflow-style: none !important; 
+        scrollbar-width: none !important; 
+        /* Hardware acceleration for all elements to reduce flicker during scroll */
+        backface-visibility: hidden;
+        perspective: 1000;
+        transform: translateZ(0);
+    }
+</style>
+<script>
+    // Ensure smooth scrolling for all programmatic scrolls
+    const originalScrollTo = window.scrollTo;
+    window.scrollTo = function(x, y) {
+        if (typeof x === 'object') {
+            originalScrollTo.call(window, { ...x, behavior: 'smooth' });
+        } else {
+            originalScrollTo.call(window, { left: x, top: y, behavior: 'smooth' });
+        }
+    };
+    // Force a small delay to ensure rendering catches up with scroll
+    const originalHF = window.__hf;
+    if (originalHF && originalHF.seek) {
+        const originalSeek = originalHF.seek;
+        originalHF.seek = async (t) => {
+            await originalSeek(t);
+            // Optional: add a tiny delay if needed, though Hyperframes should handle it
+        };
+    }
+</script>
+"""
+            # Inject patch before </head> or at the beginning
+            if "</head>" in html:
+                html = html.replace("</head>", f"{smooth_scroll_patch}</head>")
+            else:
+                html = smooth_scroll_patch + html
+                
+            with open(index_path, 'w', encoding='utf-8') as f:
+                f.write(html)
+        except Exception as e:
+            print(f"[Hyperframes] Warning: Could not inject smooth scroll: {e}")
+
+        # 2. Prepare additional files/assets
+        for filename, content in files.items():
+            dest_path = os.path.join(temp_dir, filename)
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            
+            if isinstance(content, str) and (content.startswith("http://") or content.startswith("https://")):
+                download_file(content, dest_path)
+            else:
+                # Assume raw content (string or base64)
+                mode = 'w' if isinstance(content, str) else 'wb'
+                encoding = 'utf-8' if isinstance(content, str) else None
+                with open(dest_path, mode, encoding=encoding) as f:
+                    f.write(content)
+        
+        executions[execution_id]["progress"] = 20
+        
+        # 3. Run Hyperframes Render
+        cmd = [
+            "npx.cmd", "-y", "hyperframes", "render", 
+            temp_dir,
+            "-o", os.path.abspath(output_path),
+            "--fps", str(fps),
+            "--quality", quality,
+            "--format", format,
+            "--quiet"
+        ]
+        
+        print(f"[Hyperframes] Running: {' '.join(cmd)}")
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        
+        for line in process.stdout:
+            print(f"[Hyperframes] {line.strip()}")
+            # Simple progress tracking: if we see [INFO] Compiled, we're at 30%
+            if "[INFO] Compiled" in line:
+                executions[execution_id]["progress"] = 40
+            # If we could parse "Frame X/Y", we'd update here.
+            
+        process.wait()
+        
+        if process.returncode != 0:
+            raise RuntimeError(f"Hyperframes render failed with exit code {process.returncode}")
+            
+        executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path}
+        print(f"Hyperframes render complete: {output_path}")
+
+    except Exception as e:
+        print(f"Hyperframes render failed: {e}")
+        executions[execution_id] = {"status": "failed", "error": str(e)}
+    finally:
+        try:
+            shutil.rmtree(temp_dir)
+        except:
+            pass
+
+def hyperframes_tts_task(data: Dict[str, Any], output_path: str, execution_id: str):
+    executions[execution_id] = {"status": "processing", "progress": 0}
+    text = data.get("text", "")
+    voice = data.get("voice", "af_heart")
+    speed = data.get("speed", 1.0)
+    
+    # Local Kokoro service provided by the user
+    LOCAL_TTS_URL = "http://localhost:5556/v1/audio/speech"
+    API_TOKEN = "kok_4xK9mP2nQ7wR5vL8jH3fN6yT1sZ0uB4cE2dA9gM7pV5iO8qW3xJ6nK1rY4tU"
+    
+    headers = {
+        "Authorization": f"Bearer {API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        executions[execution_id]["progress"] = 20
+        print(f"[Hyperframes] Calling local TTS with auth: {LOCAL_TTS_URL}")
+        
+        # Payload for OpenAI-compatible Kokoro API
+        payload = {
+            "model": "kokoro",
+            "input": text,
+            "voice": voice,
+            "speed": speed
+        }
+        
+        try:
+            response = requests.post(LOCAL_TTS_URL, json=payload, headers=headers, timeout=60)
+        except requests.exceptions.ConnectionError:
+            # Fallback to /tts if /v1/audio/speech is not available
+            print(f"[Hyperframes] {LOCAL_TTS_URL} connection failed, trying /tts...")
+            response = requests.post("http://localhost:5556/tts", json={
+                "text": text,
+                "voice": voice,
+                "speed": speed
+            }, headers=headers, timeout=60)
+
+        if response.status_code == 200:
+            with open(output_path, 'wb') as f:
+                f.write(response.content)
+            executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path}
+            print(f"[Hyperframes] TTS Complete: {output_path}")
+        else:
+            raise RuntimeError(f"Local TTS failed with status {response.status_code}: {response.text}")
+
+    except Exception as e:
+        print(f"[Hyperframes] TTS Error: {e}")
+        executions[execution_id] = {"status": "failed", "error": str(e)}
+
+def hyperframes_transcribe_task(data: Dict[str, Any], input_path: str, execution_id: str):
+    executions[execution_id] = {"status": "processing", "progress": 0}
+    model = data.get("model", "small.en")
+    
+    try:
+        # Hyperframes transcribe outputs a JSON file usually in the same dir or specified
+        # Let's use a temp dir to catch the output
+        temp_dir = tempfile.mkdtemp()
+        cmd = [
+            "npx.cmd", "-y", "hyperframes", "transcribe",
+            os.path.abspath(input_path),
+            "--dir", temp_dir,
+            "-m", model,
+            "--json"
+        ]
+        
+        executions[execution_id]["progress"] = 10
+        process = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if process.returncode != 0:
+            raise RuntimeError(f"Hyperframes Transcribe failed: {process.stderr}")
+            
+        # Find the generated JSON file
+        transcript_file = None
+        for f in os.listdir(temp_dir):
+            if f.endswith(".json"):
+                transcript_file = os.path.join(temp_dir, f)
+                break
+        
+        if not transcript_file:
+            raise RuntimeError("No transcript JSON generated")
+            
+        with open(transcript_file, 'r', encoding='utf-8') as f:
+            transcript_data = json.load(f)
+            
+        executions[execution_id] = {
+            "status": "completed", 
+            "progress": 100, 
+            "result": transcript_data
+        }
+    except Exception as e:
+        executions[execution_id] = {"status": "failed", "error": str(e)}
+    finally:
+        try: shutil.rmtree(temp_dir)
+        except: pass
+
+@router.post("/hyperframes/render")
+async def hyperframes_render(request: Request, background_tasks: BackgroundTasks):
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    
+    execution_id = data.get("execution_id", str(uuid.uuid4()))
+    fmt = data.get("format", "mp4")
+    output_filename = f"hyper_{execution_id}.{fmt}"
+    output_path = os.path.join("outputs", output_filename)
+    os.makedirs("outputs", exist_ok=True)
+    
+    background_tasks.add_task(render_hyperframes_task, data, output_path, execution_id)
+    
+    return {
+        "status": "queued",
+        "execution_id": execution_id,
+        "output_url": f"/file={output_path}"
+    }
+
+@router.post("/hyperframes/tts")
+async def hyperframes_tts(request: Request, background_tasks: BackgroundTasks):
+    try: data = await request.json()
+    except: return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    
+    execution_id = data.get("execution_id", str(uuid.uuid4()))
+    output_path = os.path.join("outputs", f"tts_{execution_id}.wav")
+    os.makedirs("outputs", exist_ok=True)
+    
+    background_tasks.add_task(hyperframes_tts_task, data, output_path, execution_id)
+    
+    return {"status": "queued", "execution_id": execution_id}
+
+@router.post("/hyperframes/transcribe")
+async def hyperframes_transcribe(request: Request, background_tasks: BackgroundTasks):
+    try: data = await request.json()
+    except: return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    
+    input_url = data.get("url")
+    if not input_url: return JSONResponse({"error": "Missing 'url'"}, status_code=400)
+    
+    execution_id = data.get("execution_id", str(uuid.uuid4()))
+    temp_input = os.path.join(tempfile.gettempdir(), f"transcribe_{execution_id}")
+    
+    # We download first synchronously or in background? 
+    # Let's do it in background to avoid blocking the API
+    def transcribe_flow():
+        try:
+            download_file(input_url, temp_input)
+            hyperframes_transcribe_task(data, temp_input, execution_id)
+        finally:
+            if os.path.exists(temp_input): os.remove(temp_input)
+            
+    background_tasks.add_task(transcribe_flow)
+    
+    return {"status": "queued", "execution_id": execution_id}
+
 def setup_workflow_endpoints(app):
+    ensure_hyperframes_env()
     app.include_router(router)

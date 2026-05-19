@@ -902,7 +902,7 @@ class LTX2:
         frame_num: int = 121,
         height: int = 1024,
         width: int = 1536,
-        fps: float = 24.0,
+        fps: float = 25.0,
         seed: int = 0,
         callback=None,
         set_progress_status=None,

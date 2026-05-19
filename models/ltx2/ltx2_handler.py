@@ -179,7 +179,7 @@ class family_handler:
                 build_hf_url("DeepBeepMeep/LTX-2", _GEMMA_FOLDER, _GEMMA_QUANTO_FILENAME),
             ],
             "dtype": "bf16",
-            "fps": 24,
+            "fps": 25,
             "frames_minimum": 17,
             "frames_steps": 8,
             "sliding_window": True,

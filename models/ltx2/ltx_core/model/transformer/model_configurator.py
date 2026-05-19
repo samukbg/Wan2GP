@@ -208,6 +208,7 @@ LTXV_MODEL_COMFY_RENAMING_MAP = (
     SDOps("LTXV_MODEL_COMFY_PREFIX_MAP")
     .with_matching(prefix="model.diffusion_model.")
     .with_matching(prefix="diffusion_model.")
+    .with_matching(prefix="")
     .with_replacement("model.diffusion_model.", "")
     .with_replacement("diffusion_model.", "")
 )
@@ -216,6 +217,7 @@ LTXV_MODEL_COMFY_RENAMING_WITH_TRANSFORMER_LINEAR_DOWNCAST_MAP = (
     SDOps("LTXV_MODEL_COMFY_PREFIX_MAP")
     .with_matching(prefix="model.diffusion_model.")
     .with_matching(prefix="diffusion_model.")
+    .with_matching(prefix="")
     .with_replacement("model.diffusion_model.", "")
     .with_replacement("diffusion_model.", "")
     .with_kv_operation(

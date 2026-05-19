@@ -4,6 +4,17 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "garbage_collection_threshold:0.6,max_sp
 # # os.environ.pop("TORCH_LOGS", None)  # make sure no env var is suppressing/overriding
 # os.environ["TORCH_LOGS"]= "recompiles"
 import torch._logging as tlog
+
+def safe_cuda_cleanup():
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        try: torch.cuda.synchronize()
+        except Exception: pass
+        try: torch.cuda.empty_cache()
+        except Exception: pass
+        try: torch.cuda.ipc_collect()
+        except Exception: pass
 # tlog.set_logs(recompiles=True, guards=True, graph_breaks=True)    
 p = os.path.dirname(os.path.abspath(__file__))
 if p not in sys.path:
@@ -176,11 +187,21 @@ def clear_gen_cache():
 
 
 def release_model():
-    global wan_model, offloadobj, reload_needed
+    global wan_model, offloadobj, enhancer_offloadobj, reload_needed, transformer_type
     wan_model = None
+    transformer_type = None
     clear_gen_cache()
     if "_cache" in offload.shared_state:
         del offload.shared_state["_cache"]
+    
+    if enhancer_offloadobj is not None:
+        try:
+            enhancer_offloadobj.release()
+        except Exception as _e:
+            print(f"[release_model] enhancer_offloadobj.release() failed: {_e}")
+        finally:
+            enhancer_offloadobj = None
+
     if offloadobj is not None:
         try:
             offloadobj.release()
@@ -188,7 +209,15 @@ def release_model():
             print(f"[release_model] offloadobj.release() failed: {_e}")
         finally:
             offloadobj = None
+
     offload.flush_torch_caches()
+    if torch.cuda.is_available():
+        try:
+            safe_cuda_cleanup()
+            torch.cuda.ipc_collect()
+        except Exception as _e:
+            print(f"[release_model] CUDA cleanup failed: {_e}")
+    gc.collect()
     reload_needed = True
 def get_unique_id():
     global unique_id  
@@ -4840,7 +4869,7 @@ def extract_faces_from_video_with_mask(input_video_path, input_mask_path, max_fr
 
     face_processor = None
     gc.collect()
-    torch.cuda.empty_cache()
+    safe_cuda_cleanup()
 
     face_tensor= torch.tensor(np.stack(face_list, dtype= np.float32) / 127.5 - 1).permute(-1, 0, 1, 2 ) # t h w c -> c t h w
     if pad_frames > 0:
@@ -5047,7 +5076,7 @@ def preprocess_video_with_mask(input_video_path, input_mask_path, height, width,
     preproc = None
     preproc_outside = None
     gc.collect()
-    torch.cuda.empty_cache()
+    safe_cuda_cleanup()
     if pad_frames > 0:
         masked_frames = masked_frames[0] * pad_frames + masked_frames
         if any_mask: masked_frames = masks[0] * pad_frames + masks
@@ -6246,7 +6275,7 @@ def generate_video(
     os.makedirs(image_save_path, exist_ok=True)
     os.makedirs(audio_save_path, exist_ok=True)
     gc.collect()
-    torch.cuda.empty_cache()
+    safe_cuda_cleanup()
     wan_model._interrupt = False
     abort = False
     if gen.get("abort", False):
@@ -6523,7 +6552,7 @@ def generate_video(
                             face_arc_embeds = face_arc_embeds.squeeze(0).cpu()
                             face_encoder = image_pil = None
                             gc.collect()
-                            torch.cuda.empty_cache()
+                            safe_cuda_cleanup()
 
                         if remove_background_images_ref > 0:
                             send_cmd("progress", [0, get_latest_status(state, "Removing Images References Background")])
@@ -6759,7 +6788,7 @@ def generate_video(
                 #     torch._dynamo.config.cache_size_limit = cache_size
 
                 gc.collect()
-                torch.cuda.empty_cache()
+                safe_cuda_cleanup()
                 s = str(e)
                 keyword_list = {"CUDA out of memory" : "VRAM", "Tried to allocate":"VRAM", "CUDA error: out of memory": "RAM", "CUDA error: too many resources requested": "RAM"}
                 crash_type = ""
@@ -6811,7 +6840,7 @@ def generate_video(
             clear_gen_cache()
             offloadobj.unload_all()
             gc.collect()
-            torch.cuda.empty_cache()
+            safe_cuda_cleanup()
 
             if samples == None:
                 abort = True
@@ -11518,19 +11547,27 @@ def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale
         )
     finally:
         try:
-            release_model()
+            try: release_model()
+            except Exception as e: print(f"[API /generate] release_model failed: {e}")
+            
             # Synchronise CUDA and flush all caches so VRAM and RAM are
             # returned to the OS before the next request is allowed through.
             if torch.cuda.is_available():
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                torch.cuda.ipc_collect()
-            offload.flush_torch_caches()
+                try: torch.cuda.synchronize()
+                except Exception: pass
+                safe_cuda_cleanup()
+                try: torch.cuda.ipc_collect()
+                except Exception: pass
+                
+            try: offload.flush_torch_caches()
+            except Exception: pass
+            
             gc.collect()
             print("[API /generate] Model unloaded and caches flushed.")
         except Exception as _e:
-            print(f"[API /generate] Warning: model unload/flush failed: {_e}")
-        release_generation_slot()
+            print(f"[API /generate] Warning during final cleanup: {_e}")
+        finally:
+            release_generation_slot()
 
 
 def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, audio_input=None, override_profile=-1, masking_strength=None):
@@ -11543,10 +11580,8 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
         transformer_type = None
 
     if torch.cuda.is_available():
-        torch.cuda.synchronize()
-        offload.flush_torch_caches()
-        torch.cuda.ipc_collect()
-        torch.cuda.empty_cache()
+        safe_cuda_cleanup()
+    offload.flush_torch_caches()
     gc.collect()
 
     # Get the default settings dictionary for the selected model
@@ -12078,14 +12113,14 @@ def create_ui():
         def render_video_gradio_api(data):
             from workflow_endpoints import render_video_task
             import uuid, os, threading, json
-            
+
             # Robustly handle input format (sometimes arrives as string from SDK)
             if isinstance(data, str):
                 try:
                     data = json.loads(data)
                 except:
                     return {"status": "failed", "error": "Invalid JSON string provided"}
-            
+
             if not isinstance(data, dict):
                 return {"status": "failed", "error": f"Payload must be a dictionary or JSON string, received {type(data).__name__}"}
 
@@ -12093,17 +12128,84 @@ def create_ui():
             output_filename = f"render_{execution_id}.mp4"
             output_path = os.path.join("outputs", output_filename)
             os.makedirs("outputs", exist_ok=True)
-            
+
             # Start rendering in a separate thread to return "queued" immediately
             threading.Thread(target=render_video_task, args=(data, output_path, execution_id), daemon=True).start()
-            
+
             return {
                 "status": "queued",
                 "execution_id": execution_id,
                 "output_url": f"/file={output_path}"
             }
 
+        def render_hyperframes_gradio_api(data):
+            from workflow_endpoints import render_hyperframes_task
+            import uuid, os, threading, json
+
+            if isinstance(data, str):
+                try: data = json.loads(data)
+                except: return {"status": "failed", "error": "Invalid JSON string provided"}
+
+            if not isinstance(data, dict):
+                return {"status": "failed", "error": f"Payload must be a dictionary or JSON string, received {type(data).__name__}"}
+
+            execution_id = data.get("execution_id", str(uuid.uuid4()))
+            fmt = data.get("format", "mp4")
+            output_filename = f"hyper_{execution_id}.{fmt}"
+            output_path = os.path.join("outputs", output_filename)
+            os.makedirs("outputs", exist_ok=True)
+
+            threading.Thread(target=render_hyperframes_task, args=(data, output_path, execution_id), daemon=True).start()
+
+            return {
+                "status": "queued",
+                "execution_id": execution_id,
+                "output_url": f"/file={output_path}"
+            }
+
+        def hyperframes_tts_gradio_api(data):
+            from workflow_endpoints import hyperframes_tts_task
+            import uuid, os, threading, json
+
+            if isinstance(data, str):
+                try: data = json.loads(data)
+                except: return {"status": "failed", "error": "Invalid JSON string provided"}
+
+            execution_id = data.get("execution_id", str(uuid.uuid4()))
+            output_path = os.path.join("outputs", f"tts_{execution_id}.wav")
+            os.makedirs("outputs", exist_ok=True)
+
+            threading.Thread(target=hyperframes_tts_task, args=(data, output_path, execution_id), daemon=True).start()
+
+            return {"status": "queued", "execution_id": execution_id}
+
+        def hyperframes_transcribe_gradio_api(data):
+            from workflow_endpoints import hyperframes_transcribe_task, download_file
+            import uuid, os, threading, json, tempfile
+
+            if isinstance(data, str):
+                try: data = json.loads(data)
+                except: return {"status": "failed", "error": "Invalid JSON string provided"}
+
+            execution_id = data.get("execution_id", str(uuid.uuid4()))
+            input_url = data.get("url")
+            
+            if not input_url: return {"status": "failed", "error": "Missing 'url'"}
+
+            def transcribe_flow():
+                temp_input = os.path.join(tempfile.gettempdir(), f"transcribe_{execution_id}")
+                try:
+                    download_file(input_url, temp_input)
+                    hyperframes_transcribe_task(data, temp_input, execution_id)
+                finally:
+                    if os.path.exists(temp_input): os.remove(temp_input)
+
+            threading.Thread(target=transcribe_flow, daemon=True).start()
+
+            return {"status": "queued", "execution_id": execution_id}
+
         def render_status_gradio_api(execution_id):
+
             from workflow_endpoints import executions
             status = executions.get(execution_id)
             if not status:
@@ -12115,6 +12217,13 @@ def create_ui():
             inputs=[gr.JSON(label="Payload")],
             outputs=gr.JSON(),
             api_name="render_video"
+        )
+
+        gr.Interface(
+            fn=render_hyperframes_gradio_api,
+            inputs=[gr.JSON(label="Payload")],
+            outputs=gr.JSON(),
+            api_name="hyperframes_render"
         )
 
         gr.Interface(
@@ -12326,6 +12435,7 @@ if __name__ == "__main__":
         server_name = os.getenv("SERVER_NAME", "localhost")
     demo = create_ui()
     clear_startup_lock()
+    
     if args.open_browser:
         import webbrowser
         if server_name.startswith("http"):
@@ -12333,7 +12443,7 @@ if __name__ == "__main__":
         else:
             url = "http://" + server_name
         webbrowser.open(url + ":" + str(server_port), new = 0, autoraise = True)
-    
+
     app, local_url, share_url = demo.launch(
         favicon_path="favicon.png",
         server_name=server_name,
@@ -12342,9 +12452,10 @@ if __name__ == "__main__":
         allowed_paths=list({save_path, image_save_path, audio_save_path, "icons"}),
         prevent_thread_lock=True
     )
-    
+
     # Mount custom workflow endpoints
+    from workflow_endpoints import setup_workflow_endpoints
     setup_workflow_endpoints(app)
     print(f"Workflow endpoints mounted on {local_url}")
-    
+
     demo.block_thread()

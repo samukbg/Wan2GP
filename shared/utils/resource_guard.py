@@ -179,6 +179,18 @@ def acquire_generation_slot(model_type: str = "") -> None:
     logged_ram = logged_vram = logged_queue = False
 
     while True:
+        # Before checking memory, try to collect garbage and clear caches
+        # to ensure we see the most up-to-date free memory status.
+        try:
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            # If cleanup fails (e.g. CUDA context in OOM state), proceed anyway
+            # to avoid crashing the whole server.
+            pass
+            
         ram  = _free_ram_gb()
         vram = _free_vram_gb()
 
