@@ -219,6 +219,7 @@ def generate_cinematic_prompt(
     seed: Optional[int] = None,
     post_image_caption_hook = None,
     thinking_enabled: Optional[bool] = None,
+    use_remote_vllm: bool = False,
 ) -> List[str]:
     prompts = [prompt] if isinstance(prompt, str) else prompt
 
@@ -237,6 +238,7 @@ def generate_cinematic_prompt(
             top_k,
             seed,
             thinking_enabled,
+            use_remote_vllm=use_remote_vllm,
         )
     else:
         if prompt_enhancer_instructions is None:
@@ -258,6 +260,7 @@ def generate_cinematic_prompt(
             seed,
             post_image_caption_hook=post_image_caption_hook,
             thinking_enabled=thinking_enabled,
+            use_remote_vllm=use_remote_vllm,
         )
 
     return prompts
@@ -271,6 +274,39 @@ def _get_first_frames_from_conditioning_item(conditioning_item) -> List[Image.Im
     ]
 
 
+def _generate_remote_vllm_prompt(
+    messages: List[List[dict]],
+    max_new_tokens: int,
+    temperature: Optional[float],
+    top_p: Optional[float],
+    seed: Optional[int],
+) -> List[str]:
+    import requests
+    url = "http://localhost:11434/v1/chat/completions"
+    model = "qwen3.6-27b-mtp-gguf"
+    
+    results = []
+    for msg in messages:
+        payload = {
+            "model": model,
+            "messages": msg,
+            "max_tokens": max_new_tokens,
+            "temperature": temperature if temperature is not None else 0.6,
+            "top_p": top_p if top_p is not None else 0.9,
+        }
+        if seed is not None:
+            payload["seed"] = int(seed)
+            
+        try:
+            response = requests.post(url, json=payload, timeout=60)
+            response.raise_for_status()
+            data = response.json()
+            results.append(data["choices"][0]["message"]["content"].strip())
+        except Exception as e:
+            logger.error(f"Error calling remote vLLM: {e}")
+            results.append(f"Error: could not generate prompt from remote vLLM ({e})")
+    return results
+
 def _generate_t2v_prompt(
     prompt_enhancer_model,
     prompt_enhancer_tokenizer,
@@ -283,6 +319,7 @@ def _generate_t2v_prompt(
     top_k: Optional[int],
     seed: Optional[int],
     thinking_enabled: Optional[bool],
+    use_remote_vllm: bool = False,
 ) -> List[str]:
     messages = []
     for prompt in prompts:
@@ -293,6 +330,15 @@ def _generate_t2v_prompt(
                 {"role": "system", "content": message_system_prompt},
                 {"role": "user", "content": _format_prompt_enhancer_user_content(prompt_enhancer_model, prompt_body, thinking_enabled=thinking_enabled)},
             ]
+        )
+
+    if use_remote_vllm:
+        return _generate_remote_vllm_prompt(
+            messages,
+            max_new_tokens,
+            temperature,
+            top_p,
+            seed,
         )
 
     if hasattr(prompt_enhancer_model, "generate_messages"):
@@ -352,6 +398,7 @@ def _generate_i2v_prompt(
     seed: Optional[int],
     post_image_caption_hook = None,
     thinking_enabled: Optional[bool] = None,
+    use_remote_vllm: bool = False,
 ) -> List[str]:
     if hasattr(image_caption_model, "generate_image_captions"):
         image_captions = image_caption_model.generate_image_captions(first_frames)
@@ -376,6 +423,15 @@ def _generate_i2v_prompt(
                 {"role": "system", "content": message_system_prompt},
                 {"role": "user", "content": _format_prompt_enhancer_user_content(prompt_enhancer_model, prompt_body, image_caption=image_caption, thinking_enabled=thinking_enabled)},
             ]
+        )
+
+    if use_remote_vllm:
+        return _generate_remote_vllm_prompt(
+            messages,
+            max_new_tokens,
+            temperature,
+            top_p,
+            seed,
         )
 
     if hasattr(prompt_enhancer_model, "generate_messages"):

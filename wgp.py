@@ -5494,7 +5494,7 @@ class DynamicClass:
         """Alias for assign() - more dict-like"""
         return self.assign(**dict)
 
-def process_prompt_enhancer(model_def, prompt_enhancer, original_prompts,  image_start, original_image_refs, is_image, audio_only, seed, prompt_enhancer_instructions = None ):
+def process_prompt_enhancer(model_def, prompt_enhancer, original_prompts,  image_start, original_image_refs, is_image, audio_only, seed, prompt_enhancer_instructions = None, model_type = None ):
     prompt_enhancer_mode = str(prompt_enhancer or "")
     prompt_enhancer_instructions = model_def.get("image_prompt_enhancer_instructions" if is_image else "video_prompt_enhancer_instructions", None)
     text_encoder_max_tokens = model_def.get("image_prompt_enhancer_max_tokens" if is_image else "video_prompt_enhancer_max_tokens", 256)
@@ -5528,6 +5528,9 @@ def process_prompt_enhancer(model_def, prompt_enhancer, original_prompts,  image
             enhancer_seed = secrets.randbits(32)
         else:
             enhancer_seed = seed if seed is not None and seed >= 0 else 0
+        
+        use_remote_vllm = model_type in ["ltx2_22B_distilled", "flux2_klein_9b"]
+        
         prompts = generate_cinematic_prompt(
             prompt_enhancer_image_caption_model,
             prompt_enhancer_image_caption_processor,
@@ -5543,6 +5546,7 @@ def process_prompt_enhancer(model_def, prompt_enhancer, original_prompts,  image
             temperature = enhancer_temperature,
             top_p = enhancer_top_p,
             seed = enhancer_seed,
+            use_remote_vllm = use_remote_vllm,
         )
         return prompts
 
@@ -5625,7 +5629,7 @@ def enhance_prompt(state, prompt, prompt_enhancer, multi_images_gen_type, multi_
         progress((i , num_prompts), desc=status, total= num_prompts)
 
         try:
-            enhanced_prompt = process_prompt_enhancer(model_def, prompt_enhancer, [one_prompt],  start_images, original_image_refs, is_image, audio_only, seed)    
+            enhanced_prompt = process_prompt_enhancer(model_def, prompt_enhancer, [one_prompt],  start_images, original_image_refs, is_image, audio_only, seed, model_type=get_state_model_type(state))    
         except Exception as e:
             enhancer_offloadobj.unload_all()
             release_GPU_ressources(state, "prompt_enhancer")
@@ -6334,7 +6338,7 @@ def generate_video(
         start_time = time.time()
         if prompt_enhancer_image_caption_model != None and prompt_enhancer !=None and len(prompt_enhancer)>0 and enhancer_mode == 0:
             send_cmd("progress", [0, get_latest_status(state, "Enhancing Prompt")])
-            enhanced_prompts = process_prompt_enhancer(model_def, prompt_enhancer, original_prompts,  image_start, original_image_refs, is_image, audio_only, seed )
+            enhanced_prompts = process_prompt_enhancer(model_def, prompt_enhancer, original_prompts,  image_start, original_image_refs, is_image, audio_only, seed, model_type=model_type )
             if enhanced_prompts is not None:
                 print(f"Enhanced prompts: {enhanced_prompts}" )
                 task["prompt"] = "\n".join(["!enhanced!"] + enhanced_prompts)
