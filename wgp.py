@@ -6660,154 +6660,177 @@ def generate_video(
                 gen["header_text"] = txt
                 send_cmd("output")
 
-            try:
-                input_video_for_model = pre_video_guide
-                prefix_frames_count = source_video_overlap_frames_count if window_no <= 1 else reuse_frames
-                prefix_video_for_model = prefix_video
-                if prefix_video is not None and prefix_video.dtype == torch.uint8:
-                    prefix_video_for_model = prefix_video.float().div_(127.5).sub_(1.0)
-                custom_settings_for_model = custom_settings if isinstance(custom_settings, dict) else {}
-                overridden_inputs = None
-                samples = wan_model.generate(
-                    input_prompt = prompt,
-                    alt_prompt = alt_prompt,
-                    image_start = image_start_tensor,  
-                    image_end = image_end_tensor,
-                    input_frames = src_video,
-                    input_frames2 = src_video2,
-                    input_ref_images=  src_ref_images,
-                    input_ref_masks = src_ref_masks,
-                    input_masks = src_mask,
-                    input_masks2 = src_mask2,
-                    input_video= input_video_for_model,
-                    input_faces = src_faces,
-                    input_custom = custom_guide,
-                    denoising_strength=denoising_strength,
-                    masking_strength=masking_strength,
-                    prefix_frames_count = prefix_frames_count,
-                    frame_num= (current_video_length // latent_size)* latent_size + 1,
-                    batch_size = batch_size,
-                    height = image_size[0],
-                    width = image_size[1],
-                    fit_into_canvas = fit_canvas,
-                    shift=flow_shift,
-                    sample_solver=sample_solver,
-                    sampling_steps=num_inference_steps,
-                    guide_scale=guidance_scale,
-                    guide2_scale = guidance2_scale,
-                    guide3_scale = guidance3_scale,
-                    switch_threshold = switch_threshold, 
-                    switch2_threshold = switch_threshold2,
-                    guide_phases= guidance_phases,
-                    model_switch_phase = model_switch_phase,
-                    embedded_guidance_scale=embedded_guidance_scale,
-                    n_prompt=negative_prompt,
-                    seed=seed,
-                    callback=callback,
-                    enable_RIFLEx = enable_RIFLEx,
-                    VAE_tile_size = VAE_tile_size,
-                    joint_pass = joint_pass,
-                    slg_layers = slg_layers,
-                    slg_start = slg_start_perc/100,
-                    slg_end = slg_end_perc/100,
-                    apg_switch = apg_switch,
-                    cfg_star_switch = cfg_star_switch,
-                    cfg_zero_step = cfg_zero_step,
-                    alt_guide_scale= alt_guidance_scale,
-                    audio_cfg_scale= audio_guidance_scale,
-                    input_waveform=input_waveform, 
-                    input_waveform_sample_rate=input_waveform_sample_rate,
-                    audio_guide=audio_guide,
-                    audio_guide2=audio_guide2,
-                    audio_prompt_type=audio_prompt_type,
-                    audio_proj= audio_proj_split,
-                    audio_scale= audio_scale,
-                    audio_context_lens= audio_context_lens,
-                    context_scale = context_scale,
-                    control_scale_alt = control_net_weight_alt,
-                    motion_amplitude = motion_amplitude,
-                    model_mode = model_mode,
-                    causal_block_size = 5,
-                    causal_attention = True,
-                    fps = fps,
-                    overlapped_latents = overlapped_latents,
-                    return_latent_slice= return_latent_slice,
-                    overlap_noise = sliding_window_overlap_noise,
-                    overlap_size = sliding_window_overlap,
-                    color_correction_strength = sliding_window_color_correction_strength,
-                    conditioning_latents_size = conditioning_latents_size,
-                    keep_frames_parsed = keep_frames_parsed,
-                    model_filename = model_filename,
-                    model_type = base_model_type,
-                    loras_slists = loras_slists,
-                    NAG_scale = NAG_scale,
-                    NAG_tau = NAG_tau,
-                    NAG_alpha = NAG_alpha,
-                    speakers_bboxes =speakers_bboxes,
-                    image_mode =  image_mode,
-                    video_prompt_type= video_prompt_type,
-                    window_no = window_no, 
-                    offloadobj = offloadobj,
-                    set_header_text= set_header_text,
-                    pre_video_frame = pre_video_frame,
-                    prefix_video = prefix_video_for_model,
-                    original_input_ref_images = original_image_refs[nb_frames_positions:] if original_image_refs is not None else [],
-                    image_refs_relative_size = image_refs_relative_size,
-                    outpainting_dims = outpainting_dims,
-                    face_arc_embeds = face_arc_embeds,
-                    custom_settings=custom_settings_for_model,
-                    temperature=temperature,
-                    window_start_frame_no = window_start_frame,
-                    input_video_strength = input_video_strength,
-                    self_refiner_setting = self_refiner_setting,
-                    self_refiner_plan=self_refiner_plan,
-                    self_refiner_f_uncertainty = self_refiner_f_uncertainty,
-                    self_refiner_certain_percentage = self_refiner_certain_percentage,
-                    duration_seconds=duration_seconds,
-                    pause_seconds=pause_seconds,
-                    top_p=top_p,
-                    top_k=top_k,
-                    set_progress_status=set_progress_status,                     
-                )
-            except Exception as e:
-                if len(control_audio_tracks) > 0 or len(source_audio_tracks) > 0:
-                    cleanup_temp_audio_files(control_audio_tracks + source_audio_tracks)
-                remove_temp_filenames(temp_filenames_list)
-                clear_gen_cache()
-                offloadobj.unload_all()
-                trans.cache = None 
-                if trans2 is not None: 
-                    trans2.cache = None 
-                offload.unload_loras_from_model(trans_lora)
-                if trans2_lora is not None: 
-                    offload.unload_loras_from_model(trans2_lora)
-                skip_steps_cache = None
-                # if compile:
-                #     cache_size = torch._dynamo.config.cache_size_limit                                      
-                #     torch.compiler.reset()
-                #     torch._dynamo.config.cache_size_limit = cache_size
+            oom_retries = 0
+            while True:
+                try:
+                    input_video_for_model = pre_video_guide
+                    prefix_frames_count = source_video_overlap_frames_count if window_no <= 1 else reuse_frames
+                    prefix_video_for_model = prefix_video
+                    if prefix_video is not None and prefix_video.dtype == torch.uint8:
+                        prefix_video_for_model = prefix_video.float().div_(127.5).sub_(1.0)
+                    custom_settings_for_model = custom_settings if isinstance(custom_settings, dict) else {}
+                    overridden_inputs = None
+                    samples = wan_model.generate(
+                        input_prompt = prompt,
+                        alt_prompt = alt_prompt,
+                        image_start = image_start_tensor,  
+                        image_end = image_end_tensor,
+                        input_frames = src_video,
+                        input_frames2 = src_video2,
+                        input_ref_images=  src_ref_images,
+                        input_ref_masks = src_ref_masks,
+                        input_masks = src_mask,
+                        input_masks2 = src_mask2,
+                        input_video= input_video_for_model,
+                        input_faces = src_faces,
+                        input_custom = custom_guide,
+                        denoising_strength=denoising_strength,
+                        masking_strength=masking_strength,
+                        prefix_frames_count = prefix_frames_count,
+                        frame_num= (current_video_length // latent_size)* latent_size + 1,
+                        batch_size = batch_size,
+                        height = image_size[0],
+                        width = image_size[1],
+                        fit_into_canvas = fit_canvas,
+                        shift=flow_shift,
+                        sample_solver=sample_solver,
+                        sampling_steps=num_inference_steps,
+                        guide_scale=guidance_scale,
+                        guide2_scale = guidance2_scale,
+                        guide3_scale = guidance3_scale,
+                        switch_threshold = switch_threshold, 
+                        switch2_threshold = switch_threshold2,
+                        guide_phases= guidance_phases,
+                        model_switch_phase = model_switch_phase,
+                        embedded_guidance_scale=embedded_guidance_scale,
+                        n_prompt=negative_prompt,
+                        seed=seed,
+                        callback=callback,
+                        enable_RIFLEx = enable_RIFLEx,
+                        VAE_tile_size = VAE_tile_size,
+                        joint_pass = joint_pass,
+                        slg_layers = slg_layers,
+                        slg_start = slg_start_perc/100,
+                        slg_end = slg_end_perc/100,
+                        apg_switch = apg_switch,
+                        cfg_star_switch = cfg_star_switch,
+                        cfg_zero_step = cfg_zero_step,
+                        alt_guide_scale= alt_guidance_scale,
+                        audio_cfg_scale= audio_guidance_scale,
+                        input_waveform=input_waveform, 
+                        input_waveform_sample_rate=input_waveform_sample_rate,
+                        audio_guide=audio_guide,
+                        audio_guide2=audio_guide2,
+                        audio_prompt_type=audio_prompt_type,
+                        audio_proj= audio_proj_split,
+                        audio_scale= audio_scale,
+                        audio_context_lens= audio_context_lens,
+                        context_scale = context_scale,
+                        control_scale_alt = control_net_weight_alt,
+                        motion_amplitude = motion_amplitude,
+                        model_mode = model_mode,
+                        causal_block_size = 5,
+                        causal_attention = True,
+                        fps = fps,
+                        overlapped_latents = overlapped_latents,
+                        return_latent_slice= return_latent_slice,
+                        overlap_noise = sliding_window_overlap_noise,
+                        overlap_size = sliding_window_overlap,
+                        color_correction_strength = sliding_window_color_correction_strength,
+                        conditioning_latents_size = conditioning_latents_size,
+                        keep_frames_parsed = keep_frames_parsed,
+                        model_filename = model_filename,
+                        model_type = base_model_type,
+                        loras_slists = loras_slists,
+                        NAG_scale = NAG_scale,
+                        NAG_tau = NAG_tau,
+                        NAG_alpha = NAG_alpha,
+                        speakers_bboxes =speakers_bboxes,
+                        image_mode =  image_mode,
+                        video_prompt_type= video_prompt_type,
+                        window_no = window_no, 
+                        offloadobj = offloadobj,
+                        set_header_text= set_header_text,
+                        pre_video_frame = pre_video_frame,
+                        prefix_video = prefix_video_for_model,
+                        original_input_ref_images = original_image_refs[nb_frames_positions:] if original_image_refs is not None else [],
+                        image_refs_relative_size = image_refs_relative_size,
+                        outpainting_dims = outpainting_dims,
+                        face_arc_embeds = face_arc_embeds,
+                        custom_settings=custom_settings_for_model,
+                        temperature=temperature,
+                        window_start_frame_no = window_start_frame,
+                        input_video_strength = input_video_strength,
+                        self_refiner_setting = self_refiner_setting,
+                        self_refiner_plan=self_refiner_plan,
+                        self_refiner_f_uncertainty = self_refiner_f_uncertainty,
+                        self_refiner_certain_percentage = self_refiner_certain_percentage,
+                        duration_seconds=duration_seconds,
+                        pause_seconds=pause_seconds,
+                        top_p=top_p,
+                        top_k=top_k,
+                        set_progress_status=set_progress_status,                     
+                    )
+                    break
+                except Exception as e:
+                    s = str(e)
+                    keyword_list = {"CUDA out of memory" : "VRAM", "Tried to allocate":"VRAM", "CUDA error: out of memory": "VRAM", "CUDA error: too many resources requested": "VRAM"}
+                    crash_type = ""
+                    for keyword, tp  in keyword_list.items():
+                        if keyword in s:
+                            crash_type = tp 
+                            break
+                    
+                    if crash_type == "VRAM" and oom_retries < 100:
+                        oom_retries += 1
+                        print(f"CUDA Memory error detected. Retrying ({oom_retries}/100) in 10 seconds...")
+                        clear_gen_cache()
+                        offloadobj.unload_all()
+                        if skip_steps_cache is not None:
+                            skip_steps_cache.previous_residual = None
+                            skip_steps_cache.previous_modulated_input = None
+                        gc.collect()
+                        safe_cuda_cleanup()
+                        for _ in range(10):
+                            if gen.get("abort", False):
+                                break
+                            time.sleep(1)
+                        if not gen.get("abort", False):
+                            continue
 
-                gc.collect()
-                safe_cuda_cleanup()
-                s = str(e)
-                keyword_list = {"CUDA out of memory" : "VRAM", "Tried to allocate":"VRAM", "CUDA error: out of memory": "RAM", "CUDA error: too many resources requested": "RAM"}
-                crash_type = ""
-                for keyword, tp  in keyword_list.items():
-                    if keyword in s:
-                        crash_type = tp 
-                        break
-                state["prompt"] = ""
-                if crash_type == "VRAM":
-                    new_error = "The generation of the video has encountered an error: it is likely that you have unsufficient VRAM and you should therefore reduce the video resolution or its number of frames."
-                elif crash_type == "RAM":
-                    new_error = "The generation of the video has encountered an error: it is likely that you have unsufficient RAM and / or Reserved RAM allocation should be reduced using 'perc_reserved_mem_max' or using a different Profile."
-                else:
-                    new_error =  gr.Error(f"The generation of the video has encountered an error, please check your terminal for more information. '{s}'")
-                tb = traceback.format_exc().split('\n')[:-1] 
-                print('\n'.join(tb))
-                send_cmd("error", new_error)
-                clear_status(state)
-                return False
+                    clear_gen_cache()
+                    offloadobj.unload_all()
+                    trans.cache = None 
+                    if trans2 is not None: 
+                        trans2.cache = None 
+                    offload.unload_loras_from_model(trans_lora)
+                    if trans2_lora is not None: 
+                        offload.unload_loras_from_model(trans2_lora)
+                    skip_steps_cache = None
+                    # if compile:
+                    #     cache_size = torch._dynamo.config.cache_size_limit                                      
+                    #     torch.compiler.reset()
+                    #     torch._dynamo.config.cache_size_limit = cache_size
+
+                    gc.collect()
+                    safe_cuda_cleanup()
+
+                    if len(control_audio_tracks) > 0 or len(source_audio_tracks) > 0:
+                        cleanup_temp_audio_files(control_audio_tracks + source_audio_tracks)
+                    remove_temp_filenames(temp_filenames_list)
+
+                    state["prompt"] = ""
+                    if crash_type == "VRAM":
+                        new_error = "The generation of the video has encountered an error: it is likely that you have unsufficient VRAM and you should therefore reduce the video resolution or its number of frames."
+                    elif crash_type == "RAM":
+                        new_error = "The generation of the video has encountered an error: it is likely that you have unsufficient RAM and / or Reserved RAM allocation should be reduced using 'perc_reserved_mem_max' or using a different Profile."
+                    else:
+                        new_error =  gr.Error(f"The generation of the video has encountered an error, please check your terminal for more information. '{s}'")
+                    tb = traceback.format_exc().split('\n')[:-1] 
+                    print('\n'.join(tb))
+                    send_cmd("error", new_error)
+                    clear_status(state)
+                    return False
             src_video = src_video2 = src_mask = src_mask2 = None
             if skip_steps_cache != None :
                 skip_steps_cache.previous_residual = None
