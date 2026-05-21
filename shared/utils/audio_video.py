@@ -30,6 +30,16 @@ def rand_name(length=8, suffix=''):
     return name
 
 
+def has_audio_stream(file_path):
+    if not file_path or not os.path.exists(file_path):
+        return False
+    try:
+        probe = ffmpeg.probe(file_path)
+        return any(s['codec_type'] == 'audio' for s in probe['streams'])
+    except:
+        return False
+
+
 def _prepare_audio_array(audio_data):
     if torch.is_tensor(audio_data):
         audio_data = audio_data.detach().cpu().float().numpy()
@@ -365,14 +375,14 @@ def combine_and_concatenate_video_with_audio_tracks(
         n = news[i] if len(news) == N else (news[0] if news else None)
 
         if source_audio_duration == 0:
-            if n:
+            if n and has_audio_stream(n):
                 inputs += ['-i', n]
                 filters.append(f'[{idx}:a]apad=pad_dur=100[aout{i}]')
                 idx += 1
             else:
                 filters.append(f'anullsrc=r={audio_sampling_rate}:cl=mono,apad=pad_dur=100[aout{i}]')
         else:
-            if s:
+            if s and has_audio_stream(s):
                 inputs += ['-i', s]
                 meta = source_audio_metadata[i] if source_audio_metadata and i < len(source_audio_metadata) else {}
                 needs_filter = (
@@ -395,7 +405,7 @@ def combine_and_concatenate_video_with_audio_tracks(
                 filters.append(
                     f'anullsrc=r={audio_sampling_rate}:cl=mono,atrim=0:{source_audio_duration},asetpts=PTS-STARTPTS[s{i}]')
 
-            if n:
+            if n and has_audio_stream(n):
                 inputs += ['-i', n]
                 start = '0' if new_audio_from_start else source_audio_duration
                 filters.append(
