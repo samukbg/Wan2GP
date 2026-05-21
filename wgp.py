@@ -11655,12 +11655,21 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
     image_refs = None
     if image_start:
         from PIL import Image
-        # Handle list vs single input
-        if not isinstance(image_start, list):
+        # Handle list vs single input, and flatten any nested lists from Gradio API
+        if isinstance(image_start, list):
+            flattened = []
+            for item in image_start:
+                if isinstance(item, list): flattened.extend(item)
+                else: flattened.append(item)
+            image_start = flattened
+        else:
             image_start = [image_start]
 
         image_refs = []
         for img_data in image_start:
+            # Skip empty entries
+            if img_data is None: continue
+            
             path = extract_gradio_path(img_data)
             if path and isinstance(path, str):
                 path = download_url_to_temp(path)
@@ -12120,8 +12129,8 @@ def create_ui():
                 gr.Number(label="Seed", value=-1),
                 gr.Checkbox(label="Image Mode", value=False),
                 gr.Number(label="Denoising Strength", value=None),
-                gr.Textbox(label="Image Start"),
-                gr.Textbox(label="Audio Input"),
+                gr.File(label="Image Start", file_count="multiple"),
+                gr.Audio(label="Audio Input", type="filepath"),
                 gr.Number(label="Override Profile", value=-1),
                 gr.Number(label="Masking Strength", value=None)
             ],
