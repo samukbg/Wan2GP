@@ -56,7 +56,7 @@ with gr.Blocks(title="WanGP API Server", css=css) as demo:
             api_gen_denoising = gr.Number(label="Denoising", value=1.0)
             api_gen_image_start = gr.File(label="Image Start", file_count="multiple")
             api_gen_image_end = gr.File(label="Image End", file_count="multiple")
-            api_gen_audio_input = gr.Audio(label="Audio Input", type="filepath")
+            api_gen_audio_input = gr.Textbox(label="Audio Input")
             api_gen_override_profile = gr.Number(label="Override Profile", value=-1)
             api_gen_masking_strength = gr.Number(label="Masking Strength", value=0.0)
         

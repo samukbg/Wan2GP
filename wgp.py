@@ -11707,21 +11707,21 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
             except Exception as e:
                 print(f"Failed to resize image_end: {e}")
 
-    image_refs = None
+    processed_image_start = None
+    processed_image_refs = None
     if image_start:
         from PIL import Image
         # Handle list vs single input, and flatten any nested lists from Gradio API
         if isinstance(image_start, list):
-            flattened = []
+            input_images_list = []
             for item in image_start:
-                if isinstance(item, list): flattened.extend(item)
-                else: flattened.append(item)
-            image_start = flattened
+                if isinstance(item, list): input_images_list.extend(item)
+                else: input_images_list.append(item)
         else:
-            image_start = [image_start]
+            input_images_list = [image_start]
 
-        image_refs = []
-        for img_data in image_start:
+        temp_image_refs = []
+        for img_data in input_images_list:
             # Skip empty entries
             if img_data is None: continue
             
@@ -11730,29 +11730,31 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
                 path = download_url_to_temp(path)
             if path and isinstance(path, str):
                 try:
-                    image_refs.append(Image.open(path).convert("RGB"))
+                    temp_image_refs.append(Image.open(path).convert("RGB"))
                 except Exception as e:
                     print(f"Failed to load image from path: {e}")
             elif isinstance(img_data, Image.Image):
-                image_refs.append(img_data)
+                temp_image_refs.append(img_data)
         
-        if len(image_refs) > 0:
+        if len(temp_image_refs) > 0:
             base_model_type = get_base_model_type(model_type)
-            if base_model_type.startswith("flux2") or base_model_type == "pi_flux2":
-                image_start = None
+            is_flux = base_model_type and (base_model_type.startswith("flux2") or base_model_type == "pi_flux2")
+            if is_flux:
+                processed_image_start = None
+                processed_image_refs = temp_image_refs
             else:
-                image_start = image_refs[0]
-                image_refs = image_refs[1:] if len(image_refs) > 1 else None
+                processed_image_start = temp_image_refs[0]
+                processed_image_refs = temp_image_refs[1:] if len(temp_image_refs) > 1 else None
         else:
-            image_start = None
-            image_refs = None
+            processed_image_start = None
+            processed_image_refs = None
         
-        if resolution and isinstance(image_start, Image.Image):
+        if resolution and isinstance(processed_image_start, Image.Image):
             try:
                 width, height = map(int, resolution.split('x'))
-                if image_start.size != (width, height):
-                    print(f"Resizing image_start from {image_start.size} to ({width}, {height})")
-                    image_start = image_start.resize((width, height), Image.LANCZOS)
+                if processed_image_start.size != (width, height):
+                    print(f"Resizing image_start from {processed_image_start.size} to ({width}, {height})")
+                    processed_image_start = processed_image_start.resize((width, height), Image.LANCZOS)
             except Exception as e:
                 print(f"Failed to resize image_start: {e}")
 
@@ -11783,16 +11785,16 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
         "last_resolution_per_group": server_config.get("last_resolution_per_group", {})
     }
 
-    if image_start:
-        params['image_start'] = image_start
+    if processed_image_start:
+        params['image_start'] = processed_image_start
         params['image_prompt_type'] = "S"
         params['input_video_strength'] = 1.0  # full start-image influence (default 0.75 would weaken it)
-    if image_refs:
-        print(f"API: Sending {len(image_refs)} images to generation")
-        params['image_refs'] = image_refs
+    if processed_image_refs:
+        print(f"API: Sending {len(processed_image_refs)} images to generation")
+        params['image_refs'] = processed_image_refs
         # For Flux 2, 'KI' is often better for multiple conditionings
         base_model_type = get_base_model_type(model_type)
-        flag = 'KI' if base_model_type.startswith("flux2") or base_model_type == "pi_flux2" else 'I'
+        flag = 'KI' if base_model_type and (base_model_type.startswith("flux2") or base_model_type == "pi_flux2") else 'I'
         if flag not in params.get('video_prompt_type', ''):
             params['video_prompt_type'] = params.get('video_prompt_type', '') + flag
 
@@ -11849,7 +11851,7 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
         "activated_loras": [],
         "loras_multipliers": "",
         "image_prompt_type": "S",
-        "image_start": image_start,
+        "image_start": processed_image_start,
         "image_end": actual_image_end,
         "model_mode": None,
         "video_source": None,
@@ -12186,7 +12188,7 @@ def create_ui():
                 gr.Number(label="Denoising Strength", value=None),
                 gr.File(label="Image Start", file_count="multiple"),
                 gr.File(label="Image End", file_count="multiple"),
-                gr.Audio(label="Audio Input", type="filepath"),
+                gr.Textbox(label="Audio Input"),
                 gr.Number(label="Override Profile", value=-1),
                 gr.Number(label="Masking Strength", value=None)
             ],
