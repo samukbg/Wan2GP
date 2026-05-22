@@ -3590,7 +3590,13 @@ def get_default_profile(output_type):
     return default_profile_video
 
 def compute_profile(override_profile, output_type="video"):
-    return override_profile if override_profile != -1 else get_default_profile(output_type)
+    profile = override_profile if override_profile != -1 else get_default_profile(output_type)
+    # Validate profile against known choices to prevent "Unknown profile" crashes
+    valid_profiles = [1, 2, 3, 3.5, 4, 4.5, 5]
+    if profile not in valid_profiles:
+        print(f"Warning: Computed profile {profile} is invalid. Defaulting to Profile 4.")
+        return 4
+    return profile
 
 def get_output_type_for_model(model_type, image_mode=0):
     model_def = get_model_def(model_type)
@@ -11798,9 +11804,27 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
         if flag not in params.get('video_prompt_type', ''):
             params['video_prompt_type'] = params.get('video_prompt_type', '') + flag
 
-    params['override_profile'] = override_profile if override_profile is not None else -1
+    # Robustly parse numeric arguments from API to avoid type mismatches
+    try:
+        if override_profile is not None:
+            # Handle both "-1", -1, and floats like 3.5
+            _op = float(str(override_profile).strip())
+            override_profile = int(_op) if _op == int(_op) else _op
+        else:
+            override_profile = -1
+    except:
+        override_profile = -1
 
-    # Override the defaults with the parameters that came from the API call
+    try:
+        if masking_strength is not None:
+            masking_strength = float(str(masking_strength).strip())
+        else:
+            masking_strength = 0.0
+    except:
+        masking_strength = 0.0
+
+    params['override_profile'] = override_profile
+    params['masking_strength'] = masking_strength
     params['model_type'] = model_type
     params['prompt'] = prompt
     if num_inference_steps is not None:
@@ -11928,8 +11952,6 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
     }
     for key, value in defaults.items():
         params.setdefault(key, value)
-    if image_refs:
-        params['image_refs'] = image_refs
     if denoising_strength is not None:
         params['denoising_strength'] = denoising_strength
     else:
