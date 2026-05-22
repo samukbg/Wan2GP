@@ -12209,7 +12209,7 @@ def create_ui():
                 gr.Checkbox(label="Image Mode", value=False),
                 gr.Number(label="Denoising Strength", value=None),
                 gr.File(label="Image Start", file_count="multiple"),
-                gr.File(label="Image End", file_count="multiple"),
+                gr.File(label="Image End"),
                 gr.Textbox(label="Audio Input"),
                 gr.Number(label="Override Profile", value=-1),
                 gr.Number(label="Masking Strength", value=None)
