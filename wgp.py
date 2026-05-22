@@ -830,6 +830,7 @@ def validate_settings(state, model_type, single_prompt, inputs):
     switch_threshold = inputs["switch_threshold"]
     switch_threshold2 = inputs["switch_threshold2"]
     video_guide_outpainting = inputs["video_guide_outpainting"]
+    video_guide_outpainting_ratio = inputs.get("video_guide_outpainting_ratio", "")
     spatial_upsampling = inputs["spatial_upsampling"]
     motion_amplitude = inputs["motion_amplitude"]
     self_refiner_setting = inputs["self_refiner_setting"]
@@ -1169,6 +1170,7 @@ def validate_settings(state, model_type, single_prompt, inputs):
         "motion_amplitude": motion_amplitude,
         "model_mode": model_mode,
         "video_guide_outpainting": video_guide_outpainting,
+        "video_guide_outpainting_ratio": video_guide_outpainting_ratio,
         "custom_settings": inputs.get("custom_settings", None),
         "self_refiner_plan": self_refiner_plan,
     } 
@@ -2888,6 +2890,13 @@ def fix_settings(model_type, ui_defaults, min_settings_version = 0):
 
     ui_defaults["video_prompt_type"] = video_prompt_type
 
+    multi_prompts_gen_type = ui_defaults.get("multi_prompts_gen_type", None)
+    if isinstance(multi_prompts_gen_type, str):
+        ui_defaults["multi_prompts_gen_type"] = {"G": 0, "0": 0, "W": 1, "1": 1, "FG": 2, "2": 2}.get(multi_prompts_gen_type, 0)
+
+    if "video_guide_outpainting_ratio" not in ui_defaults:
+        ui_defaults["video_guide_outpainting_ratio"] = ""
+
     tea_cache_setting = ui_defaults.get("tea_cache_setting", None)
     tea_cache_start_step_perc = ui_defaults.get("tea_cache_start_step_perc", None)
 
@@ -3430,10 +3439,33 @@ def check_loras_exist(model_type, loras_choices_files, download = False, send_cm
     lora_dir = get_lora_dir(model_type)
     missing_local_loras = []
     missing_remote_loras = []
+    
+    # Get model def and preload_URLs to find missing URLs
+    model_def = get_model_def(model_type)
+    preload_URLs = []
+    if model_def:
+        preload_URLs = get_model_recursive_prop(model_type, "preload_URLs", return_list=True)
+
     for lora_file in loras_choices_files:
         local_path = os.path.join(lora_dir, os.path.basename(lora_file))
         if not os.path.isfile(local_path):
             url = loras_url_cache.get(local_path, None)         
+            
+            # If not in cache, check if it's a URL itself or in preload_URLs
+            if url is None:
+                if lora_file.startswith("http"):
+                    url = lora_file
+                    update_loras_url_cache(lora_dir, [url])
+                else:
+                    # Look for filename match in preload_URLs
+                    base_name = os.path.basename(lora_file)
+                    for p_url in preload_URLs:
+                        if os.path.basename(p_url) == base_name:
+                            url = p_url
+                            # Update cache for future use
+                            update_loras_url_cache(lora_dir, [url])
+                            break
+
             if url is not None:
                 if download:
                     if send_cmd is not None:
@@ -5529,7 +5561,7 @@ def process_prompt_enhancer(model_def, prompt_enhancer, original_prompts,  image
         else:
             enhancer_seed = seed if seed is not None and seed >= 0 else 0
         
-        use_remote_vllm = True # model_type in ["ltx2_22B_distilled", "flux2_klein_9b"]
+        use_remote_vllm = True # model_type in ["ltx2_22B_distilled", "ltx2_22B_distilled_1_1", "flux2_klein_9b"]
         
         prompts = generate_cinematic_prompt(
             prompt_enhancer_image_caption_model,
@@ -5828,7 +5860,6 @@ def generate_video(
     denoising_strength,
     masking_strength,     
     video_guide_outpainting,
-    video_guide_outpainting_ratio,
     video_mask,
     image_mask,
     control_net_weight,
@@ -5883,6 +5914,7 @@ def generate_video(
     state,
     model_type,
     mode,
+    video_guide_outpainting_ratio="",
     plugin_data=None,
     ):
     return_path = None
@@ -11557,7 +11589,7 @@ def get_js():
     return start_quit_timer_js, cancel_quit_timer_js, trigger_zip_download_js, trigger_settings_download_js, click_brush_js
 
 
-def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, audio_input=None, override_profile=-1, masking_strength=None):
+def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None):
     """
     A dedicated wrapper for the /generate API endpoint.
     Waits for sufficient RAM/VRAM, serialises concurrent requests, then delegates
@@ -11570,7 +11602,7 @@ def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale
         return _api_endpoint_handler_inner(
             model_type, prompt, num_inference_steps, guidance_scale,
             resolution, video_length, seed, image_mode, denoising_strength,
-            image_start, audio_input, override_profile, masking_strength
+            image_start, image_end, audio_input, override_profile, masking_strength
         )
     finally:
         try:
@@ -11597,7 +11629,7 @@ def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale
             release_generation_slot()
 
 
-def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, audio_input=None, override_profile=-1, masking_strength=None):
+def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None):
     global transformer_type
     import gc
     import torch
@@ -11651,6 +11683,29 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
     if actual_audio_input is not None:
         params['audio_source'] = actual_audio_input
         params['audio_prompt_type'] = 'A'  # enable lipsync; ltx2 routes audio_source→audio_guide when 'A' is set
+
+    actual_image_end = None
+    if image_end:
+        from PIL import Image
+        path = extract_gradio_path(image_end)
+        if path and isinstance(path, str):
+            path = download_url_to_temp(path)
+        if path and isinstance(path, str):
+            try:
+                actual_image_end = Image.open(path).convert("RGB")
+            except Exception as e:
+                print(f"Failed to load image_end from path: {e}")
+        elif isinstance(image_end, Image.Image):
+            actual_image_end = image_end
+            
+        if actual_image_end and resolution:
+            try:
+                width, height = map(int, resolution.split('x'))
+                if actual_image_end.size != (width, height):
+                    print(f"Resizing image_end from {actual_image_end.size} to ({width}, {height})")
+                    actual_image_end = actual_image_end.resize((width, height), Image.LANCZOS)
+            except Exception as e:
+                print(f"Failed to resize image_end: {e}")
 
     image_refs = None
     if image_start:
@@ -11795,11 +11850,11 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
         "loras_multipliers": "",
         "image_prompt_type": "S",
         "image_start": image_start,
-        "image_end": None,
+        "image_end": actual_image_end,
         "model_mode": None,
         "video_source": None,
         "keep_frames_video_source": "",
-        "video_prompt_type": "",
+        "video_prompt_type": "E" if actual_image_end else "",
         "image_refs": None,
         "frames_positions": "",
         "video_guide": None,
@@ -12130,6 +12185,7 @@ def create_ui():
                 gr.Checkbox(label="Image Mode", value=False),
                 gr.Number(label="Denoising Strength", value=None),
                 gr.File(label="Image Start", file_count="multiple"),
+                gr.File(label="Image End", file_count="multiple"),
                 gr.Audio(label="Audio Input", type="filepath"),
                 gr.Number(label="Override Profile", value=-1),
                 gr.Number(label="Masking Strength", value=None)
