@@ -1,6 +1,6 @@
 import os, sys
 os.environ["GRADIO_LANG"] = "en"
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "garbage_collection_threshold:0.6,max_split_size_mb:128"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "garbage_collection_threshold:0.5"
 # # os.environ.pop("TORCH_LOGS", None)  # make sure no env var is suppressing/overriding
 # os.environ["TORCH_LOGS"]= "recompiles"
 import torch._logging as tlog
@@ -7328,6 +7328,12 @@ def process_tasks(state):
                 params = task['params']
                 for key in ["model_filename", "lset_name"]:
                     params.pop(key, None)
+
+                # Prioritize VRAM recovery before model loading/generation
+                try: 
+                    safe_cuda_cleanup()
+                    offload.flush_torch_caches()
+                except: pass
                 
                 try:
                     import inspect
@@ -11651,6 +11657,11 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
 
     # Get the default settings dictionary for the selected model
     params = get_default_settings(model_type)
+    
+    # Clear potential leaks from presets/defaults for API calls
+    params['audio_guide'] = None
+    params['audio_guide2'] = None
+    params['audio_source'] = None
 
     # Function to robustly extract path from different Gradio input formats
     def extract_gradio_path(inp):
@@ -11686,9 +11697,18 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
     actual_audio_input = extract_gradio_path(audio_input)
     if actual_audio_input is not None:
         actual_audio_input = download_url_to_temp(actual_audio_input)
-    if actual_audio_input is not None:
+    
+    # Robustly check if audio_input is a valid local file before enabling lip-sync
+    import os
+    if actual_audio_input and os.path.isfile(actual_audio_input):
         params['audio_source'] = actual_audio_input
-        params['audio_prompt_type'] = 'A'  # enable lipsync; ltx2 routes audio_source→audio_guide when 'A' is set
+        params['audio_prompt_type'] = 'A'  # enable lipsync (Audio-to-Video)
+    else:
+        # Default to text-to-audio ('1') for LTX 2.3 models if no valid file is provided,
+        # otherwise it defaults to muted ('') in the parameters list below.
+        base_model_type = get_base_model_type(model_type)
+        if base_model_type and base_model_type.startswith("ltx2_22B"):
+            params['audio_prompt_type'] = '1'
 
     actual_image_end = None
     if image_end:
