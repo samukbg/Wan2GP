@@ -13,8 +13,7 @@ def safe_cuda_cleanup():
         except Exception: pass
         try: torch.cuda.empty_cache()
         except Exception: pass
-        try: torch.cuda.ipc_collect()
-        except Exception: pass
+        # Do not use ipc_collect() as it often causes 'resource already mapped' errors on Windows
 # tlog.set_logs(recompiles=True, guards=True, graph_breaks=True)    
 p = os.path.dirname(os.path.abspath(__file__))
 if p not in sys.path:
@@ -11700,15 +11699,14 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
     
     # Robustly check if audio_input is a valid local file before enabling lip-sync
     import os
-    if actual_audio_input and os.path.isfile(actual_audio_input):
+    if actual_audio_input and os.path.isfile(actual_audio_input) and os.path.getsize(actual_audio_input) > 44:
         params['audio_source'] = actual_audio_input
         params['audio_prompt_type'] = 'A'  # enable lipsync (Audio-to-Video)
     else:
-        # Default to text-to-audio ('1') for LTX 2.3 models if no valid file is provided,
-        # otherwise it defaults to muted ('') in the parameters list below.
-        base_model_type = get_base_model_type(model_type)
-        if base_model_type and base_model_type.startswith("ltx2_22B"):
-            params['audio_prompt_type'] = '1'
+        # If no valid file is provided, do NOT force '' or '1' yet.
+        # Let it be handled by setdefault below so it respects the model's .json default
+        # but provide a final fallback if even the model doesn't specify.
+        pass
 
     actual_image_end = None
     if image_end:
@@ -11737,6 +11735,18 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
     processed_image_refs = None
     if image_start:
         from PIL import Image
+        # Handle stringified JSON/repr from Textbox components
+        if isinstance(image_start, str):
+            image_start_strip = image_start.strip()
+            if (image_start_strip.startswith('[') and image_start_strip.endswith(']')) or (image_start_strip.startswith('{') and image_start_strip.endswith('}')):
+                import json
+                try:
+                    image_start = json.loads(image_start_strip.replace("'", '"'))
+                except:
+                    import ast
+                    try: image_start = ast.literal_eval(image_start_strip)
+                    except: pass
+                    
         # Handle list vs single input, and flatten any nested lists from Gradio API
         if isinstance(image_start, list):
             input_images_list = []
@@ -12032,6 +12042,58 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
     threading.Thread(target=delayed_delete, args=(result_path,), daemon=True).start()
     return result_path
 
+def motion_api_handler(description):
+    """
+    Generates production-grade Framer Motion animation configurations (JSON)
+    based on a text description.
+    """
+    from shared.prompt_enhancer.prompt_enhance_utils import generate_cinematic_prompt
+    
+    system_prompt = """You are a senior UI/UX engineer and expert in Framer Motion. 
+    Your goal is to transform a description of a UI movement into a production-grade, React-compatible Framer Motion configuration object.
+    
+    Output MUST be a valid JSON object with the following structure:
+    {
+      "variants": { 
+        "initial": { ... },
+        "animate": { ... },
+        "exit": { ... }
+      },
+      "transition": { ... },
+      "explanation": "Brief reasoning for the chosen values"
+    }
+    
+    Guidelines:
+    1. Use spring transitions for physical objects (stiffness: 100-500, damping: 10-30).
+    2. Use ease-out curves for simple fades or slides.
+    3. Ensure smooth, professional, and 'alive' feeling.
+    4. Handle transforms (x, y, scale, rotate) and opacity.
+    
+    Example Input: 'A gentle bounce-in from the bottom for a success checkmark'
+    Example Output: { "variants": { "initial": { "y": 20, "opacity": 0, "scale": 0.5 }, "animate": { "y": 0, "opacity": 1, "scale": 1 } }, "transition": { "type": "spring", "stiffness": 300, "damping": 15 } }
+    """
+
+    prompts = generate_cinematic_prompt(
+        None, None, None, None,
+        prompt=[description],
+        text_prompt=True,
+        max_new_tokens=1024,
+        prompt_enhancer_instructions=system_prompt,
+        use_remote_vllm=True
+    )
+    
+    if prompts and len(prompts) > 0:
+        result = prompts[0].strip()
+        # Ensure it looks like JSON
+        if not (result.startswith('{') and result.endswith('}')):
+             # Strip markdown if any
+             if '```json' in result:
+                 result = result.split('```json')[1].split('```')[0].strip()
+             elif '```' in result:
+                 result = result.split('```')[1].strip()
+        return result
+    return '{"error": "Failed to generate animation"}'
+
 def api_unload_handler():
     if gen_in_progress:
         return "Unable to release RAM when a Generation is in Progress"
@@ -12236,6 +12298,13 @@ def create_ui():
             ],
             outputs=gr.File(),
             api_name="generate"
+        )
+
+        gr.Interface(
+            fn=motion_api_handler,
+            inputs=[gr.Textbox(label="Animation Description")],
+            outputs=gr.Textbox(label="Framer Motion JSON"),
+            api_name="motion"
         )
 
         gr.Interface(
