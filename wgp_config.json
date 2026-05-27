@@ -45,7 +45,8 @@
         "ltx2": "ltx2_22B_distilled_1_1",
         "wan2_2": "vace_14B_2_2",
         "wan": "infinitetalk",
-        "ltxv": "ltxv_13B"
+        "ltxv": "ltxv_13B",
+        "flux2": "flux2_klein_9b"
     },
     "last_model_per_type": {
         "ltx2_19B": "ltx2_19B",
@@ -55,10 +56,12 @@
         "infinitetalk": "infinitetalk",
         "ovi": "ovi_1_1_10s_fastwan",
         "vace_14B_2_2": "vace_14B_2_2",
-        "ltxv_13B": "ltxv_13B"
+        "ltxv_13B": "ltxv_13B",
+        "flux2_dev": "flux2_dev",
+        "flux2_klein_9b": "flux2_klein_9b"
     },
     "last_model_type": "ltx2_22B_distilled_1_1",
-    "last_resolution_choice": "512x512",
+    "last_resolution_choice": "720x1280",
     "last_resolution_per_group": {
         "720p": "720x1280",
         "480p": "512x512",

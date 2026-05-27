@@ -18,6 +18,7 @@
     "num_inference_steps": 8,
     "video_length": 241,
     "resolution": "1280x720",
+    "audio_prompt_type": "1",
     "activated_loras": [
         "https://huggingface.co/joyfox/LTX-2.3-Transition-LORA/resolve/main/ltx2.3-transition.safetensors"
     ],
