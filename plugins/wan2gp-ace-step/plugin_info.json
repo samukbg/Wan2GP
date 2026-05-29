@@ -1,0 +1,9 @@
+{
+    "name": "wan2gp-ace-step",
+    "version": "1.0.0",
+    "author": "DeepBeepMeep",
+    "description": "ACE-Step audio generation integrated into Wan2GP - text-to-music, audio2audio, retake, and repainting",
+    "url": "https://github.com/ace-step/ACE-Step",
+    "compatible": ">=0.9.0",
+    "system": false
+}

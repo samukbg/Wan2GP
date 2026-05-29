@@ -58,9 +58,10 @@
         "vace_14B_2_2": "vace_14B_2_2",
         "ltxv_13B": "ltxv_13B",
         "flux2_dev": "flux2_dev",
-        "flux2_klein_9b": "flux2_klein_9b"
+        "flux2_klein_9b": "flux2_klein_9b",
+        "pi_flux2": "pi_flux2"
     },
-    "last_model_type": "ltx2_22B_distilled_1_1",
+    "last_model_type": "flux2_klein_9b",
     "last_resolution_choice": "720x1280",
     "last_resolution_per_group": {
         "720p": "720x1280",
