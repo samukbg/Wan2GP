@@ -281,54 +281,6 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
             
         executions[execution_id]["progress"] = 10
         
-        try:
-            with open(index_path, 'r', encoding='utf-8') as f:
-                html = f.read()
-            
-            smooth_scroll_patch = """
-<style>
-    html { scroll-behavior: smooth !important; }
-    body { 
-        overflow: hidden !important; 
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-    }
-    ::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
-    * { 
-        -ms-overflow-style: none !important; 
-        scrollbar-width: none !important; 
-        backface-visibility: hidden;
-        perspective: 1000;
-        transform: translateZ(0);
-    }
-</style>
-<script>
-    const originalScrollTo = window.scrollTo;
-    window.scrollTo = function(x, y) {
-        if (typeof x === 'object') {
-            originalScrollTo.call(window, { ...x, behavior: 'smooth' });
-        } else {
-            originalScrollTo.call(window, { left: x, top: y, behavior: 'smooth' });
-        }
-    };
-    const originalHF = window.__hf;
-    if (originalHF && originalHF.seek) {
-        const originalSeek = originalHF.seek;
-        originalHF.seek = async (t) => {
-            await originalSeek(t);
-        };
-    }
-</script>
-"""
-            if "</head>" in html:
-                html = html.replace("</head>", f"{smooth_scroll_patch}</head>")
-            else:
-                html = smooth_scroll_patch + html
-                
-            with open(index_path, 'w', encoding='utf-8') as f:
-                f.write(html)
-        except Exception as e:
-            print(f"[Hyperframes] Warning: Could not inject smooth scroll: {e}")
 
         for filename, content in files.items():
             dest_path = os.path.join(temp_dir, filename)
