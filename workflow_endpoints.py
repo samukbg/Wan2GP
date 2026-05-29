@@ -200,7 +200,7 @@ def render_video_task(data: Dict[str, Any], output_path: str, execution_id: str)
             with open(srt_path, 'w', encoding='utf-8') as f:
                 f.write(srt_content)
             
-            escaped_srt = srt_path.replace("\", "/").replace(":", "\\\\:")
+            escaped_srt = srt_path.replace("\\", "/").replace(":", "\\\\:")
             sub_filter = f"subtitles='{escaped_srt}'"
             if font_style:
                 sub_filter += f":force_style='{font_style}'"
