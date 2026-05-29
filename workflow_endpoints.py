@@ -42,7 +42,8 @@ def ensure_hyperframes_env():
         try:
             print("[Hyperframes] Ensuring browser environment...")
             cmd = get_npx_command()
-            subprocess.run([cmd, "-y", "hyperframes", "browser", "ensure"], check=True, capture_output=True)
+            use_shell = (os.name == "nt")
+            subprocess.run([cmd, "-y", "hyperframes", "browser", "ensure"], check=True, capture_output=True, shell=use_shell)
             print("[Hyperframes] Browser environment ready.")
         except Exception as e:
             print(f"[Hyperframes] Warning during browser ensure: {e}")
@@ -199,7 +200,7 @@ def render_video_task(data: Dict[str, Any], output_path: str, execution_id: str)
             with open(srt_path, 'w', encoding='utf-8') as f:
                 f.write(srt_content)
             
-            escaped_srt = srt_path.replace("\", "/").replace(":", "\\:")
+            escaped_srt = srt_path.replace("\", "/").replace(":", "\\\\:")
             sub_filter = f"subtitles='{escaped_srt}'"
             if font_style:
                 sub_filter += f":force_style='{font_style}'"
@@ -355,8 +356,6 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
         ]
         
         print(f"[Hyperframes] Running: {' '.join(cmd)}")
-        # Use shell=True on Windows to handle .cmd files correctly if needed,
-        # but npx.cmd should work as executable if found by shutil.which.
         use_shell = (os.name == "nt")
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=use_shell)
         
