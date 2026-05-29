@@ -281,6 +281,11 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
             
         executions[execution_id]["progress"] = 10
         
+        tsx_content = data.get("tsx")
+        if tsx_content:
+            with open(os.path.join(temp_dir, "Component.tsx"), "w", encoding="utf-8") as f:
+                f.write(tsx_content)
+
 
         for filename, content in files.items():
             dest_path = os.path.join(temp_dir, filename)
