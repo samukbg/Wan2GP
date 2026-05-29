@@ -12348,8 +12348,13 @@ def create_ui():
             import uuid, os, threading, json
 
             if isinstance(data, str):
-                try: data = json.loads(data)
-                except: return {"status": "failed", "error": "Invalid JSON string provided"}
+                if data.strip().startswith("<"):
+                    data = {"html": data}
+                else:
+                    try: 
+                        data = json.loads(data)
+                    except: 
+                        return {"status": "failed", "error": "Invalid JSON string provided"}
 
             if not isinstance(data, dict):
                 return {"status": "failed", "error": f"Payload must be a dictionary or JSON string, received {type(data).__name__}"}

@@ -27,7 +27,7 @@ def ensure_hyperframes_env():
     def _ensure():
         try:
             print("[Hyperframes] Ensuring browser environment...")
-            subprocess.run(["npx.cmd", "-y", "hyperframes", "browser", "ensure"], check=True, capture_output=True)
+            subprocess.run(["npx", "-y", "hyperframes", "browser", "ensure"], check=True, capture_output=True)
             print("[Hyperframes] Browser environment ready.")
         except Exception as e:
             print(f"[Hyperframes] Warning during browser ensure: {e}")
@@ -371,7 +371,7 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
         
         # 3. Run Hyperframes Render
         cmd = [
-            "npx.cmd", "-y", "hyperframes", "render", 
+            "npx", "-y", "hyperframes", "render", 
             temp_dir,
             "-o", os.path.abspath(output_path),
             "--fps", str(fps),
@@ -466,7 +466,7 @@ def hyperframes_transcribe_task(data: Dict[str, Any], input_path: str, execution
         # Let's use a temp dir to catch the output
         temp_dir = tempfile.mkdtemp()
         cmd = [
-            "npx.cmd", "-y", "hyperframes", "transcribe",
+            "npx", "-y", "hyperframes", "transcribe",
             os.path.abspath(input_path),
             "--dir", temp_dir,
             "-m", model,
