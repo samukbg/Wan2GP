@@ -6,6 +6,8 @@ import requests
 import uuid
 import shutil
 import time
+import platform
+import sys
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
@@ -16,18 +18,30 @@ router = APIRouter()
 # Global dictionary to store execution status
 executions = {}
 
+def get_npx_command():
+    """Robustly find the npx command for the current platform."""
+    # Check common Windows variations first if we detect Windows
+    if os.name == "nt" or sys.platform == "win32" or platform.system() == "Windows":
+        for cmd in ["npx.cmd", "npx.bat", "npx"]:
+            if shutil.which(cmd):
+                return cmd
+        return "npx.cmd" # default for windows
+    
+    # Non-Windows
+    if shutil.which("npx"):
+        return "npx"
+    return "npx"
+
 def ensure_hyperframes_env():
     """Ensure ffmpeg and chrome are available for hyperframes."""
     # Ensure ffmpeg is on PATH
     download_ffmpeg()
     
     # Check if chrome is installed for hyperframes
-    # This might take a moment if it's the first time
-    # Run in background to avoid blocking server startup
     def _ensure():
         try:
             print("[Hyperframes] Ensuring browser environment...")
-            cmd = "npx.cmd" if os.name == "nt" else "npx"
+            cmd = get_npx_command()
             subprocess.run([cmd, "-y", "hyperframes", "browser", "ensure"], check=True, capture_output=True)
             print("[Hyperframes] Browser environment ready.")
         except Exception as e:
@@ -82,7 +96,6 @@ def render_video_task(data: Dict[str, Any], output_path: str, execution_id: str)
             processed_v_path = os.path.join(temp_dir, f"proc_seg_{i}.ts")
             processed_a_path = os.path.join(temp_dir, f"audio_seg_{i}.wav")
             
-            # Normalize Video
             vf = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps}"
             
             cmd_v = ["ffmpeg", "-y", "-i", raw_path]
@@ -330,9 +343,9 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
         
         executions[execution_id]["progress"] = 20
         
-        npx_cmd = "npx.cmd" if os.name == "nt" else "npx"
+        npx_executable = get_npx_command()
         cmd = [
-            npx_cmd, "-y", "hyperframes", "render", 
+            npx_executable, "-y", "hyperframes", "render", 
             temp_dir,
             "-o", os.path.abspath(output_path),
             "--fps", str(fps),
@@ -342,7 +355,10 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
         ]
         
         print(f"[Hyperframes] Running: {' '.join(cmd)}")
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        # Use shell=True on Windows to handle .cmd files correctly if needed,
+        # but npx.cmd should work as executable if found by shutil.which.
+        use_shell = (os.name == "nt")
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=use_shell)
         
         for line in process.stdout:
             print(f"[Hyperframes] {line.strip()}")
@@ -419,9 +435,9 @@ def hyperframes_transcribe_task(data: Dict[str, Any], input_path: str, execution
     
     try:
         temp_dir = tempfile.mkdtemp()
-        npx_cmd = "npx.cmd" if os.name == "nt" else "npx"
+        npx_executable = get_npx_command()
         cmd = [
-            npx_cmd, "-y", "hyperframes", "transcribe",
+            npx_executable, "-y", "hyperframes", "transcribe",
             os.path.abspath(input_path),
             "--dir", temp_dir,
             "-m", model,
@@ -429,7 +445,8 @@ def hyperframes_transcribe_task(data: Dict[str, Any], input_path: str, execution
         ]
         
         executions[execution_id]["progress"] = 10
-        process = subprocess.run(cmd, capture_output=True, text=True)
+        use_shell = (os.name == "nt")
+        process = subprocess.run(cmd, capture_output=True, text=True, shell=use_shell)
         
         if process.returncode != 0:
             raise RuntimeError(f"Hyperframes Transcribe failed: {process.stderr}")
