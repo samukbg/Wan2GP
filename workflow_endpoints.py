@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 import tempfile
 import subprocess
 import requests
@@ -12,6 +13,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from shared.ffmpeg_setup import download_ffmpeg
+from playwright.async_api import async_playwright
 
 router = APIRouter()
 
@@ -485,6 +487,58 @@ async def hyperframes_transcribe(request: Request, background_tasks: BackgroundT
     background_tasks.add_task(transcribe_flow)
     
     return {"status": "queued", "execution_id": execution_id}
+
+async def record_website(payload):
+    url = payload.get("url")
+    duration = payload.get("duration", 5)
+    width = payload.get("width", 720)
+    height = payload.get("height", 1280)
+    
+    output_filename = f"record_{uuid.uuid4()}.mp4"
+    output_path = os.path.join("outputs", output_filename)
+    os.makedirs("outputs", exist_ok=True)
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(args=["--no-sandbox"])
+        context = await browser.new_context(
+            viewport={"width": width, "height": height},
+            record_video_dir="outputs/temp_video"
+        )
+        page = await context.new_page()
+        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        await asyncio.sleep(2) # Wait for initial render
+        
+        # Simple linear scroll logic
+        start_time = time.time()
+        while time.time() - start_time < duration:
+            await page.mouse.wheel(0, 100)
+            await asyncio.sleep(0.1)
+            
+        video_path = await page.video.path()
+        await context.close()
+        await browser.close()
+        
+        # Rename the playwright generated video to our final path
+        os.rename(video_path, output_path)
+        return {"status": "completed", "output_url": output_path}
+
+async def take_screenshot(payload):
+    url = payload.get("url")
+    width = payload.get("width", 1080)
+    height = payload.get("height", 1920)
+    
+    output_filename = f"screen_{uuid.uuid4()}.jpg"
+    output_path = os.path.join("outputs", output_filename)
+    os.makedirs("outputs", exist_ok=True)
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(args=["--no-sandbox"])
+        page = await browser.new_page(viewport={"width": width, "height": height})
+        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        await asyncio.sleep(3)
+        await page.screenshot(path=output_path, type="jpeg", quality=90)
+        await browser.close()
+        return output_path
 
 def setup_workflow_endpoints(app):
     ensure_hyperframes_env()

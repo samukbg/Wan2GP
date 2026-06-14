@@ -12314,6 +12314,20 @@ def create_ui():
             api_name="unload"
         )
 
+        # Website Recording & Screenshots
+        from workflow_endpoints import record_website, take_screenshot
+        gr.Interface(fn=record_website, inputs="json", outputs="json", api_name="record_website")
+        gr.Interface(fn=take_screenshot, inputs="json", outputs="file", api_name="take_screenshot")
+
+        # Motion API (Framer Motion)
+        from wgp import motion_api_handler
+        gr.Interface(
+            fn=motion_api_handler,
+            inputs=[gr.Textbox(label="Animation Description")],
+            outputs=gr.Textbox(label="Framer Motion JSON"),
+            api_name="motion"
+        )
+
         # Gradio-compatible wrappers for Workflow Rendering
         def render_video_gradio_api(data):
             from workflow_endpoints import render_video_task
