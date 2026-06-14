@@ -21,7 +21,7 @@ from typing import Any, Iterator, Sequence
 from PIL import Image
 
 from shared.utils.process_locks import set_main_generation_running
-from shared.utils.virtual_media import parse_virtual_media_path, replace_virtual_media_source
+from shared.utils.virtual_media import get_virtual_media_vsource, parse_virtual_media_path, replace_virtual_media_source
 
 _RUNTIME_LOCK = threading.RLock()
 _GENERATION_LOCK = threading.RLock()
@@ -39,7 +39,7 @@ def extract_status_phase_label(text: str | None) -> str:
     parts = [part.strip() for part in raw_text.split("|") if len(part.strip()) > 0] or [raw_text]
     stripped_wrapper = False
     for part in parts:
-        phase_text = part.rsplit(" - ", 1)[-1].strip()
+        phase_text = part
         while True:
             cleaned = _STATUS_INDEX_RE.sub("", phase_text)
             cleaned = _STATUS_STEP_PREFIX_RE.sub("", cleaned)
@@ -93,9 +93,12 @@ class GeneratedArtifact:
     media_type: str
     client_id: str = ""
     video_tensor_uint8: Any = None
+    video_tensor_hdr: Any = None
+    hdr: bool = False
     audio_tensor: Any = None
     audio_sampling_rate: int | None = None
     fps: float | None = None
+    flashvsr_continue_cache: Any = None
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any], *, default_client_id: str = "") -> "GeneratedArtifact | None":
@@ -106,9 +109,12 @@ class GeneratedArtifact:
             media_type=str(payload.get("media_type") or "video"),
             client_id=str(payload.get("client_id") or default_client_id or "").strip(),
             video_tensor_uint8=payload.get("video_tensor_uint8"),
+            video_tensor_hdr=payload.get("video_tensor_hdr"),
+            hdr=bool(payload.get("hdr", False)),
             audio_tensor=payload.get("audio_tensor"),
             audio_sampling_rate=payload.get("audio_sampling_rate"),
             fps=payload.get("fps"),
+            flashvsr_continue_cache=payload.get("flashvsr_continue_cache"),
         )
 
 
@@ -158,9 +164,33 @@ def _coerce_api_video_tensor_uint8(output_video_frames: Any) -> Any:
     except Exception:
         torch = None
     if torch is not None and torch.is_tensor(output_video_frames):
-        return output_video_frames
+        if output_video_frames.dtype == torch.uint8:
+            return output_video_frames
+        return output_video_frames.detach().cpu().float().clamp(-1, 1).add(1.0).mul(127.5).round().to(torch.uint8)
     if isinstance(output_video_frames, list) and len(output_video_frames) == 1 and torch is not None and torch.is_tensor(output_video_frames[0]):
-        return output_video_frames[0]
+        return _coerce_api_video_tensor_uint8(output_video_frames[0])
+    if isinstance(output_video_frames, list) and torch is not None:
+        tensors = [item for item in output_video_frames if torch.is_tensor(item)]
+        if len(tensors) == len(output_video_frames) and tensors and all(item.dtype == torch.uint8 and item.ndim == 4 for item in tensors):
+            return torch.cat(tensors, dim=1)
+        if len(tensors) == len(output_video_frames) and tensors and all(item.dtype != torch.uint8 and item.ndim == 4 for item in tensors):
+            return torch.cat([_coerce_api_video_tensor_uint8(item) for item in tensors], dim=1)
+    return None
+
+
+def _coerce_api_video_tensor_hdr(output_video_frames: Any) -> Any:
+    try:
+        import torch
+    except Exception:
+        torch = None
+    if torch is not None and torch.is_tensor(output_video_frames):
+        return output_video_frames if output_video_frames.dtype != torch.uint8 else None
+    if isinstance(output_video_frames, list) and len(output_video_frames) == 1 and torch is not None and torch.is_tensor(output_video_frames[0]):
+        return output_video_frames[0] if output_video_frames[0].dtype != torch.uint8 else None
+    if isinstance(output_video_frames, list) and torch is not None:
+        tensors = [item for item in output_video_frames if torch.is_tensor(item)]
+        if len(tensors) == len(output_video_frames) and tensors and all(item.dtype != torch.uint8 and item.ndim == 4 for item in tensors):
+            return torch.cat(tensors, dim=1)
     return None
 
 
@@ -168,7 +198,7 @@ def _coerce_api_audio_tensor(output_audio_data: Any) -> Any:
     return None if output_audio_data is None else np.asarray(output_audio_data, dtype=np.float32)
 
 
-def build_api_output_artifact_payload(client_id: str, video_path: Any, media_type: str, output_video_frames: Any, output_audio_data: Any, output_audio_sampling_rate: Any, output_fps: Any) -> dict[str, Any] | None:
+def build_api_output_artifact_payload(client_id: str, video_path: Any, media_type: str, output_video_frames: Any, output_audio_data: Any, output_audio_sampling_rate: Any, output_fps: Any, *, hdr: bool = False, flashvsr_continue_cache: Any = None) -> dict[str, Any] | None:
     client_id = str(client_id or "").strip()
     if len(client_id) == 0:
         return None
@@ -177,15 +207,18 @@ def build_api_output_artifact_payload(client_id: str, video_path: Any, media_typ
         "client_id": client_id,
         "path": output_path,
         "media_type": str(media_type or "video"),
-        "video_tensor_uint8": _coerce_api_video_tensor_uint8(output_video_frames),
+        "video_tensor_uint8": None if hdr else _coerce_api_video_tensor_uint8(output_video_frames),
+        "video_tensor_hdr": _coerce_api_video_tensor_hdr(output_video_frames) if hdr else None,
+        "hdr": bool(hdr),
         "audio_tensor": _coerce_api_audio_tensor(output_audio_data),
         "audio_sampling_rate": int(output_audio_sampling_rate) if output_audio_sampling_rate else None,
         "fps": float(output_fps) if output_fps else None,
+        "flashvsr_continue_cache": flashvsr_continue_cache,
     }
 
 
-def store_api_output_artifact(gen: dict[str, Any], client_id: str, video_path: Any, media_type: str, output_video_frames: Any, output_audio_data: Any, output_audio_sampling_rate: Any, output_fps: Any) -> bool:
-    payload = build_api_output_artifact_payload(client_id, video_path, media_type, output_video_frames, output_audio_data, output_audio_sampling_rate, output_fps)
+def store_api_output_artifact(gen: dict[str, Any], client_id: str, video_path: Any, media_type: str, output_video_frames: Any, output_audio_data: Any, output_audio_sampling_rate: Any, output_fps: Any, *, hdr: bool = False, flashvsr_continue_cache: Any = None) -> bool:
+    payload = build_api_output_artifact_payload(client_id, video_path, media_type, output_video_frames, output_audio_data, output_audio_sampling_rate, output_fps, hdr=hdr, flashvsr_continue_cache=flashvsr_continue_cache)
     if payload is None:
         return False
     gen.setdefault("api_output_artifacts", {})[payload["client_id"]] = payload
@@ -327,6 +360,9 @@ class SessionJob:
         self._webui_client_ids = tuple(str(client_id or "").strip() for client_id in client_ids if str(client_id or "").strip())
         self._webui_load_queue_token = str(load_queue_token or "").strip()
 
+    def release_input_payload(self) -> None:
+        self._webui_manifest = []
+
     def _mark_webui_submission_ready(self) -> None:
         self._webui_submission_ready.set()
 
@@ -418,6 +454,64 @@ class WanGPSession:
     def ensure_ready(self) -> "WanGPSession":
         self._ensure_runtime()
         return self
+
+    def list_model_defs(self, *, family: str | Sequence[str] | None = None, base_model_type: str | Sequence[str] | None = None, finetune: bool | str | None = None, model_type: str | Sequence[str] | None = None, main_output: str | Sequence[str] | None = None, inputs: str | Sequence[str] | None = None) -> list[dict[str, Any]]:
+        runtime = self._ensure_runtime()
+        with _pushd(runtime.root):
+            return runtime.module.list_model_defs(family=family, base_model_type=base_model_type, finetune=finetune, model_type=model_type, main_output=main_output, inputs=inputs)
+
+    def get_model_defs(self, **filters: Any) -> list[dict[str, Any]]:
+        return self.list_model_defs(**filters)
+
+    def list_model_metadata(self, **filters: Any) -> list[dict[str, Any]]:
+        metadata_records = []
+        for model_def in self.list_model_defs(**filters):
+            metadata = copy.deepcopy(model_def.get("metadata", {}))
+            metadata.setdefault("model_type", str(model_def.get("model_type") or ""))
+            metadata["name"] = model_def.get("name", metadata.get("model_type", ""))
+            metadata_records.append(metadata)
+        return metadata_records
+
+    def get_model_def(self, model_type: str) -> dict[str, Any] | None:
+        runtime = self._ensure_runtime()
+        with _pushd(runtime.root):
+            model_def = runtime.module.get_model_def(model_type)
+        if model_def is None:
+            return None
+        model_def = copy.deepcopy(model_def)
+        model_def["model_type"] = str(model_type)
+        return model_def
+
+    def get_model_metadata(self, model_type: str) -> dict[str, Any] | None:
+        model_def = self.get_model_def(model_type)
+        if model_def is None:
+            return None
+        metadata = copy.deepcopy(model_def.get("metadata", {}))
+        metadata.setdefault("model_type", str(model_type))
+        metadata["name"] = model_def.get("name", metadata.get("model_type", ""))
+        return metadata
+
+    def get_default_settings(self, model_type: str) -> dict[str, Any]:
+        if self.get_model_def(model_type) is None:
+            raise ValueError(f"Unknown model_type: {model_type}")
+        runtime = self._ensure_runtime()
+        with _pushd(runtime.root):
+            return copy.deepcopy(runtime.module.get_default_settings(model_type))
+
+    def get_model_schema(self, model_type: str) -> dict[str, Any] | None:
+        model_def = self.get_model_def(model_type)
+        if model_def is None:
+            return None
+        metadata = copy.deepcopy(model_def.get("metadata", {}))
+        metadata.setdefault("model_type", str(model_type))
+        return {
+            "model_type": str(model_type),
+            "name": model_def.get("name", str(model_type)),
+            "model_def": model_def,
+            "metadata": metadata,
+            "setting_values": copy.deepcopy(metadata.get("setting_values", {})),
+            "default_settings": self.get_default_settings(model_type),
+        }
 
     def submit(self, source: str | os.PathLike[str] | dict[str, Any] | list[dict[str, Any]], callbacks: object | None = None) -> SessionJob:
         tasks = self._normalize_source(source, caller_base_path=self._get_caller_base_path())
@@ -562,7 +656,7 @@ class WanGPSession:
 
         run_webui_job(self, job, tasks)
 
-    def _build_progress_update(self, data: Any) -> ProgressUpdate:
+    def _build_progress_update(self, data: Any, *, include_state_fallback: bool = True) -> ProgressUpdate:
         current_step: int | None = None
         total_steps: int | None = None
         status = ""
@@ -582,23 +676,24 @@ class WanGPSession:
             status = str(data or "")
 
         raw_phase = None
-        progress_phase = self._state["gen"].get("progress_phase")
-        if isinstance(progress_phase, tuple) and progress_phase:
-            raw_phase = extract_status_phase_label(progress_phase[0])
-            if current_step is None and len(progress_phase) > 1 and "denoising" in raw_phase.lower():
-                try:
-                    progress_step = int(progress_phase[1])
-                except (TypeError, ValueError):
-                    progress_step = -1
-                try:
-                    inference_steps = int(self._state["gen"].get("num_inference_steps") or 0)
-                except (TypeError, ValueError):
-                    inference_steps = 0
-                if progress_step >= 0 and inference_steps > 0:
-                    current_step = progress_step
-                    total_steps = inference_steps
-        if len(status) == 0:
-            status = str(self._state["gen"].get("progress_status", "") or raw_phase or "")
+        if include_state_fallback:
+            progress_phase = self._state["gen"].get("progress_phase")
+            if isinstance(progress_phase, tuple) and progress_phase:
+                raw_phase = extract_status_phase_label(progress_phase[0])
+                if current_step is None and len(progress_phase) > 1 and "denoising" in raw_phase.lower():
+                    try:
+                        progress_step = int(progress_phase[1])
+                    except (TypeError, ValueError):
+                        progress_step = -1
+                    try:
+                        inference_steps = int(self._state["gen"].get("num_inference_steps") or 0)
+                    except (TypeError, ValueError):
+                        inference_steps = 0
+                    if progress_step >= 0 and inference_steps > 0:
+                        current_step = progress_step
+                        total_steps = inference_steps
+            if len(status) == 0:
+                status = str(self._state["gen"].get("progress_status", "") or raw_phase or "")
         status_phase_label = extract_status_phase_label(status)
         if len(status_phase_label) > 0 and len(str(raw_phase or "").strip()) > 0 and current_step is None:
             normalized_status_phase = self._normalize_phase(status_phase_label)
@@ -873,6 +968,8 @@ class WanGPSession:
         if not isinstance(value, str) or not value.strip():
             return value
         spec = parse_virtual_media_path(value)
+        if spec is not None and get_virtual_media_vsource(spec) is not None:
+            return value
         path = Path(spec.source_path if spec is not None else value)
         if path.is_absolute():
             resolved = str(path.resolve())

@@ -68,8 +68,8 @@ _DEEPY_DOCS = {
     "getting_started": {"title": "Getting Started", "path": _DOCS_DIR / "GETTING_STARTED.md"},
     "loras": {"title": "Loras", "path": _DOCS_DIR / "LORAS.md"},
     "overview": {"title": "Overview", "path": _DOCS_DIR / "OVERVIEW.md"},
+    "processing": {"title": "Processing", "path": _DOCS_DIR / "PROCESSING.md"},
     "prompts": {"title": "Prompts", "path": _DOCS_DIR / "PROMPTS.md"},
-    "vace": {"title": "VACE", "path": _DOCS_DIR / "VACE.md"},
 }
 _DOC_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 _DOC_TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -1220,10 +1220,10 @@ class tools:
         text = str(raw_value or "").strip()
         return (text, None) if len(text) > 0 else (None, f"extra_settings['{label}'] must be a non-empty string.")
 
-    def _apply_extra_settings_overrides(self, tool_name: str, task: dict[str, Any], extra_settings: dict[str, Any] | None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        if extra_settings is None:
+    def _apply_extra_settings_overrides(self, tool_name: str, task: dict[str, Any], extra_settings_overrides: dict[str, Any] | None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        if extra_settings_overrides is None:
             return task, None
-        if not isinstance(extra_settings, dict):
+        if not isinstance(extra_settings_overrides, dict):
             return None, {
                 "status": "error",
                 "client_id": str(task.get("client_id", "") or "").strip(),
@@ -1232,7 +1232,7 @@ class tools:
                 "resolution": str(task.get("resolution", "") or "").strip(),
                 "error": "extra_settings must be an object.",
             }
-        if len(extra_settings) == 0:
+        if len(extra_settings_overrides) == 0:
             return task, None
         settings_info = self._get_generation_extra_settings_info(task)
         if len(settings_info) == 0:
@@ -1248,7 +1248,7 @@ class tools:
         custom_settings = task.get("custom_settings", None)
         if not isinstance(custom_settings, dict):
             custom_settings = {}
-        for raw_label, raw_value in extra_settings.items():
+        for raw_label, raw_value in extra_settings_overrides.items():
             label_key = _normalize_extra_setting_lookup_label(raw_label)
             if len(label_key) == 0:
                 return None, {
@@ -2172,7 +2172,7 @@ class tools:
                     self._update_tool_progress("running", "Running", {"status": "running", "client_id": client_id, "prompt": prompt, "resolution": resolution})
                     break
                 if not queue_wait_suspend_logged and time.time() - queue_wait_started_at >= 10:
-                    print(f"Tool {activity_console_label} suspended while waiting than WanGP Video Generator gets in focus")
+                    print(f"Tool {activity_console_label} suspended while waiting than WanGP Media Generator gets in focus")
                     queue_wait_suspend_logged = True
                     queue_wait_suspended = True
                 time.sleep(0.25)
@@ -3751,7 +3751,7 @@ class tools:
             },
             "doc_id": {
                 "type": "string",
-                "description": "Optional documentation id to limit the search to: finetunes, getting_started, loras, overview, prompts, or vace.",
+                "description": "Optional documentation id to limit the search to: finetunes, getting_started, loras, overview, processing, or prompts.",
                 "required": False,
             },
         },
@@ -3818,7 +3818,7 @@ class tools:
         parameters={
             "doc_id": {
                 "type": "string",
-                "description": "Documentation id: finetunes, getting_started, loras, overview, prompts, or vace.",
+                "description": "Documentation id: finetunes, getting_started, loras, overview, processing, or prompts.",
             },
             "section": {
                 "type": "string",
@@ -4300,6 +4300,7 @@ class AssistantEngine:
         self._skip_generation_context_sync_once = False
         self._continued_segment_raw_text = ""
         self._continued_segment_token_ids: list[int] = []
+        self._runtime_debug_signature = ""
         bind_runtime_tools = getattr(self.tool_box, "bind_runtime_tools", None)
         if callable(bind_runtime_tools):
             bind_runtime_tools(vision_query_callback=self._run_visual_query, tool_progress_callback=self._handle_tool_progress)
@@ -4307,6 +4308,36 @@ class AssistantEngine:
     def _log(self, message: str) -> None:
         if self.debug_enabled:
             print(f"[Assistant] {message}")
+
+    def _log_runtime_info(self, model) -> None:
+        if not self.debug_enabled:
+            return
+        engine_state = ""
+        if self.runtime is not None:
+            try:
+                engine_state = self.runtime._describe_engine_state(getattr(model, "_prompt_enhancer_vllm_engine", None))
+            except Exception:
+                engine_state = ""
+        info = {
+            "model_class": model.__class__.__name__,
+            "engine": str(getattr(model, "_prompt_enhancer_engine_name", "") or ""),
+            "use_vllm": bool(getattr(model, "_prompt_enhancer_use_vllm", False)),
+            "use_legacy_cuda_runner": bool(getattr(model, "_prompt_enhancer_use_legacy_cuda_runner", False)),
+            "enable_cudagraph": bool(getattr(model, "_prompt_enhancer_enable_cudagraph", False)),
+            "allow_vllm_kernels": bool(getattr(model, "_prompt_enhancer_allow_vllm_kernels", False)),
+            "safe_legacy": bool(getattr(model, "_prompt_enhancer_safe_legacy", False)),
+            "vllm_mode": str(getattr(model, "_prompt_enhancer_vllm_mode", "") or ""),
+            "runtime_model_path": str(getattr(model, "_prompt_enhancer_vllm_model_path", "") or ""),
+            "vram_mode": self.vram_mode,
+            "context_window": int(self._get_context_window_tokens()),
+            "thinking_enabled": bool(self.thinking_enabled),
+            "engine_state": engine_state,
+        }
+        signature = _json_dumps(info)
+        if signature == self._runtime_debug_signature:
+            return
+        self._runtime_debug_signature = signature
+        print(f"[AssistantRuntime] Deepy text runtime: {signature}")
 
     def _emit_chat_event(self, payload: str | None) -> None:
         if payload is None or len(str(payload).strip()) == 0:
@@ -5035,10 +5066,13 @@ class AssistantEngine:
             self._gpu_acquired = True
             acquired_here = True
         try:
+            if self.debug_enabled:
+                print(f"[AssistantRuntime] Ensuring Deepy text runtime is loaded vram_mode={self.vram_mode} context_window={int(self._get_context_window_tokens())}")
             model, _tokenizer = self.runtime_hooks.ensure_loaded()
             model._prompt_enhancer_min_model_len_hint = self._get_context_window_tokens()
             if self.runtime is None or self.runtime.model is not model:
                 self.runtime = Qwen35AssistantRuntime(model, debug_enabled=self.debug_enabled)
+            self._log_runtime_info(model)
             return self.runtime
         except Exception:
             if acquired_here:

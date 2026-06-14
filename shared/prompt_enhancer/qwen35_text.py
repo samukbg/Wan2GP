@@ -60,6 +60,10 @@ def _env_enabled(name: str, default: bool = True) -> bool:
     return raw in ("1", "true", "yes", "y", "on")
 
 
+def _is_mps_available() -> bool:
+    return hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+
+
 def _resolve_gguf_model_path(model_path: str | None, assets_dir: str, variant: str | None = None) -> str:
     if model_path is not None:
         resolved = fl.locate_file(model_path, error_if_none=False) or model_path
@@ -84,7 +88,7 @@ def get_qwen35_text_quanto_int8_path(assets_dir: str, variant: str | None = None
 
 def _resolve_gguf_linear_attention_layout_from_filename(model_path: str) -> tuple[bool, bool, bool]:
     filename = os.path.basename(str(model_path or "")).strip().lower().replace("_", "-")
-    if filename == "qwen3.5-9b-abliterated-q4-k-m-bis.gguf":
+    if filename == "qwen3.5-9b-abliterated-text-q4-k-m-bis.gguf":
         return True, True, False
     if filename in {
         "qwen3.5-9b-abliterated-text-q4-k-m.gguf",
@@ -506,7 +510,7 @@ def _use_vllm_prompt_enhancer(model) -> bool:
 
 
 def _use_legacy_cuda_runner_prompt_enhancer(model) -> bool:
-    return bool(getattr(model, "_prompt_enhancer_use_legacy_cuda_runner", False)) and torch.cuda.is_available()
+    return bool(getattr(model, "_prompt_enhancer_use_legacy_cuda_runner", False)) and (torch.cuda.is_available() or _is_mps_available())
 
 
 def _get_assistant_graph_pool_handle(model, usage_mode: str | None, enable_cudagraph: bool):
@@ -693,6 +697,7 @@ def _unload_prompt_enhancer_text_runtime(self):
         finally:
             self._prompt_enhancer_vllm_engine = None
             self._prompt_enhancer_vllm_mode = None
+    self._prompt_enhancer_assistant_graph_pool_handle = None
     try:
         clear_qwen35_runtime_caches()
     except Exception:
@@ -739,10 +744,21 @@ def _load_local_text_model(
     return model
 
 
+def _tie_qwen35_output_to_embeddings(model: torch.nn.Module) -> None:
+    token_embd = getattr(model, "token_embd", None)
+    output = getattr(model, "output", None)
+    if token_embd is None or output is None or not hasattr(token_embd, "weight") or not hasattr(output, "weight"):
+        raise RuntimeError("Cannot tie Qwen3.5 output head to token embeddings.")
+    if output.weight is not token_embd.weight:
+        output.weight = token_embd.weight
+
+
 def _resolve_legacy_text_execution_device() -> torch.device:
-    if not torch.cuda.is_available():
-        raise RuntimeError("Qwen3.5 legacy prompt enhancement now requires CUDA.")
-    return torch.device("cuda", torch.cuda.current_device())
+    if torch.cuda.is_available():
+        return torch.device("cuda", torch.cuda.current_device())
+    if _is_mps_available():
+        return torch.device("mps")
+    raise RuntimeError("Qwen3.5 legacy prompt enhancement requires CUDA or MPS.")
 
 
 def _configure_qwen35_gguf_text_model(
@@ -943,6 +959,14 @@ def load_qwen35_text_prompt_enhancer(
     if not os.path.isfile(model_path):
         raise FileNotFoundError(f"Qwen3.5 text checkpoint not found: {model_path}")
     print(f"[Qwen3.5VL][{spec['display_name']}][{backend}] Loading text checkpoint: {model_path}")
+    if backend == enhancer_quantization_GGUF:
+        print(
+            "[Qwen3.5VL]"
+            f"[{spec['display_name']}][gguf] Linear-attention layout flags: "
+            f"v_head_reordered={bool(gguf_v_head_reordered)} "
+            f"ssm_param_reordered={bool(gguf_ssm_param_reordered)} "
+            f"interleave_ssm_ab={bool(gguf_interleave_ssm_ab)}"
+        )
 
     model = _load_local_text_model(
         model_path,
@@ -952,6 +976,8 @@ def load_qwen35_text_prompt_enhancer(
         safe_legacy_mode=safe_legacy_mode,
         materialize_source_tensors=backend != enhancer_quantization_GGUF,
     )
+    if backend == enhancer_quantization_QUANTO_INT8 and spec.get("text_int8_tie_word_embeddings", False):
+        _tie_qwen35_output_to_embeddings(model)
     if backend == enhancer_quantization_GGUF:
         _configure_qwen35_gguf_text_model(
             model,

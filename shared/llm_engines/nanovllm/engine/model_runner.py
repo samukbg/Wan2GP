@@ -257,6 +257,10 @@ class ModelRunner:
         gc.collect()
 
     def _get_graph_capture_signature(self):
+        # Note: this only samples the first parameter, so it can miss a partial address
+        # reuse after an offloader (e.g. MMGP) evicts and reloads the model. Integrations
+        # that interleave other models must explicitly call reset_runtime_state() (engine
+        # release_runtime_allocations()) when their phase ends, like Chain-of-Zoom does.
         model_ptr = -1
         kv_ptr = -1
         try:
@@ -277,6 +281,20 @@ class ModelRunner:
             return next(self.model.parameters()).device
         except Exception:
             return torch.device("cpu")
+
+    def _get_runtime_device(self) -> torch.device:
+        if torch.cuda.is_available():
+            return torch.device("cuda", torch.cuda.current_device())
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return torch.device("mps")
+        return self._get_model_device()
+
+    def _pin_memory_enabled(self) -> bool:
+        return self._get_runtime_device().type == "cuda"
+
+    def _to_runtime_device(self, tensor: torch.Tensor) -> torch.Tensor:
+        device = self._get_runtime_device()
+        return tensor.to(device=device, non_blocking=device.type == "cuda")
 
     def _drop_graph_cache_entry(self, cache_key):
         entry = self._graph_cache.pop(cache_key, None)
@@ -324,12 +342,16 @@ class ModelRunner:
         return cached
 
     def set_sampling_seed(self, seed: int | None):
-        if seed is None or not torch.cuda.is_available():
+        if seed is None:
             self._sampling_generator = None
             return
-        generator = torch.Generator(device="cuda")
-        generator.manual_seed(int(seed))
-        self._sampling_generator = generator
+        device = self._get_runtime_device()
+        try:
+            generator = torch.Generator(device=device)
+            generator.manual_seed(int(seed))
+            self._sampling_generator = generator
+        except Exception:
+            self._sampling_generator = None
 
     @staticmethod
     def _apply_logits_bias(logits_row: torch.Tensor, bias: torch.Tensor):
@@ -340,34 +362,35 @@ class ModelRunner:
         max_bs = self.config.max_num_seqs
         max_tokens = self.config.max_num_batched_tokens
         max_num_blocks = (self.config.max_model_len + self.block_size - 1) // self.block_size
+        pin_memory = self._pin_memory_enabled()
         
         # Pre-allocate pinned memory buffers on CPU for fast transfer
         # Must explicitly specify device="cpu" since default device may be "cuda"
-        self._cpu_temperatures = torch.zeros(max_bs, dtype=torch.float32, device="cpu", pin_memory=True)
-        self._cpu_cfg_scales = torch.zeros(max_bs, dtype=torch.float32, device="cpu", pin_memory=True)
-        self._cpu_top_ks = torch.zeros(max_bs, dtype=torch.int32, device="cpu", pin_memory=True)
-        self._cpu_top_ps = torch.zeros(max_bs, dtype=torch.float32, device="cpu", pin_memory=True)
-        self._cpu_min_ps = torch.zeros(max_bs, dtype=torch.float32, device="cpu", pin_memory=True)
-        self._cpu_repetition_penalties = torch.zeros(max_bs, dtype=torch.float32, device="cpu", pin_memory=True)
+        self._cpu_temperatures = torch.zeros(max_bs, dtype=torch.float32, device="cpu", pin_memory=pin_memory)
+        self._cpu_cfg_scales = torch.zeros(max_bs, dtype=torch.float32, device="cpu", pin_memory=pin_memory)
+        self._cpu_top_ks = torch.zeros(max_bs, dtype=torch.int32, device="cpu", pin_memory=pin_memory)
+        self._cpu_top_ps = torch.zeros(max_bs, dtype=torch.float32, device="cpu", pin_memory=pin_memory)
+        self._cpu_min_ps = torch.zeros(max_bs, dtype=torch.float32, device="cpu", pin_memory=pin_memory)
+        self._cpu_repetition_penalties = torch.zeros(max_bs, dtype=torch.float32, device="cpu", pin_memory=pin_memory)
         
         # Pre-allocate decode buffers on CPU with pinned memory
-        self._cpu_input_ids = torch.zeros(max_bs, dtype=torch.int64, device="cpu", pin_memory=True)
-        self._cpu_positions = torch.zeros(max_bs, dtype=torch.int64, device="cpu", pin_memory=True)
-        self._cpu_slot_mapping = torch.zeros(max_bs, dtype=torch.int32, device="cpu", pin_memory=True)
-        self._cpu_context_lens = torch.zeros(max_bs, dtype=torch.int32, device="cpu", pin_memory=True)
+        self._cpu_input_ids = torch.zeros(max_bs, dtype=torch.int64, device="cpu", pin_memory=pin_memory)
+        self._cpu_positions = torch.zeros(max_bs, dtype=torch.int64, device="cpu", pin_memory=pin_memory)
+        self._cpu_slot_mapping = torch.zeros(max_bs, dtype=torch.int32, device="cpu", pin_memory=pin_memory)
+        self._cpu_context_lens = torch.zeros(max_bs, dtype=torch.int32, device="cpu", pin_memory=pin_memory)
         
         # Pre-allocate prefill buffers on CPU with pinned memory (optimization to avoid repeated tensor creation)
-        self._cpu_prefill_input_ids = torch.zeros(max_tokens, dtype=torch.int64, device="cpu", pin_memory=True)
-        self._cpu_prefill_positions = torch.zeros(max_tokens, dtype=torch.int64, device="cpu", pin_memory=True)
-        self._cpu_prefill_cu_seqlens = torch.zeros(max_bs + 1, dtype=torch.int32, device="cpu", pin_memory=True)
-        self._cpu_prefill_slot_mapping = torch.zeros(max_tokens, dtype=torch.int32, device="cpu", pin_memory=True)
+        self._cpu_prefill_input_ids = torch.zeros(max_tokens, dtype=torch.int64, device="cpu", pin_memory=pin_memory)
+        self._cpu_prefill_positions = torch.zeros(max_tokens, dtype=torch.int64, device="cpu", pin_memory=pin_memory)
+        self._cpu_prefill_cu_seqlens = torch.zeros(max_bs + 1, dtype=torch.int32, device="cpu", pin_memory=pin_memory)
+        self._cpu_prefill_slot_mapping = torch.zeros(max_tokens, dtype=torch.int32, device="cpu", pin_memory=pin_memory)
         
         # Pre-allocate block tables buffer (shared by both decode and prefill)
-        self._cpu_block_tables = torch.zeros(max_bs, max_num_blocks, dtype=torch.int32, device="cpu", pin_memory=True)
+        self._cpu_block_tables = torch.zeros(max_bs, max_num_blocks, dtype=torch.int32, device="cpu", pin_memory=pin_memory)
         
         # Pre-allocate buffer for sequence token IDs (used in logits processor and sampler)
         # Max length is max_model_len since sequences can be that long
-        self._seq_token_ids_buffer = torch.zeros(max_bs, self.config.max_model_len, dtype=torch.int64, device="cpu", pin_memory=True)
+        self._seq_token_ids_buffer = torch.zeros(max_bs, self.config.max_model_len, dtype=torch.int64, device="cpu", pin_memory=pin_memory)
 
     def _release_sample_buffers(self):
         buffer_names = [
@@ -475,6 +498,8 @@ class ModelRunner:
     def allocate_kv_cache(self):
         config = self.config
         hf_config = config.hf_config
+        runtime_device = self._get_runtime_device()
+        is_cuda_runtime = runtime_device.type == "cuda"
         num_kv_heads = hf_config.num_key_value_heads // self.world_size
         head_dim = getattr(hf_config, "head_dim", hf_config.hidden_size // hf_config.num_attention_heads)
         kv_cache_modules = self._get_kv_cache_modules()
@@ -486,19 +511,20 @@ class ModelRunner:
         required_total_blocks = required_blocks_per_seq * max(1, config.max_num_seqs)
         config.num_kvcache_blocks = max(1, int(required_total_blocks))
         required_kv_bytes = config.num_kvcache_blocks * block_bytes
-        free, total = torch.cuda.mem_get_info()
-        current = torch.cuda.memory_stats()["allocated_bytes.all.current"]
-        target_total_usage = total * config.gpu_memory_utilization
-        allowed_kv_bytes = max(0, target_total_usage - current)
-        if required_kv_bytes > allowed_kv_bytes:
-            raise RuntimeError(
-                f"Insufficient GPU memory for strict KV cache sizing under gpu_memory_utilization={config.gpu_memory_utilization:.2f}. "
-                f"Required KV: {required_kv_bytes / 1024**3:.2f} GB "
-                f"(blocks={config.num_kvcache_blocks}, block={block_bytes / 1024**2:.2f} MB), "
-                f"Allowed by limit: {allowed_kv_bytes / 1024**3:.2f} GB, "
-                f"Free: {free / 1024**3:.2f} GB, Current: {current / 1024**3:.2f} GB, "
-                f"Requested max_model_len={config.max_model_len}, max_num_seqs={config.max_num_seqs}."
-            )
+        if is_cuda_runtime:
+            free, total = torch.cuda.mem_get_info()
+            current = torch.cuda.memory_stats()["allocated_bytes.all.current"]
+            target_total_usage = total * config.gpu_memory_utilization
+            allowed_kv_bytes = max(0, target_total_usage - current)
+            if required_kv_bytes > allowed_kv_bytes:
+                raise RuntimeError(
+                    f"Insufficient GPU memory for strict KV cache sizing under gpu_memory_utilization={config.gpu_memory_utilization:.2f}. "
+                    f"Required KV: {required_kv_bytes / 1024**3:.2f} GB "
+                    f"(blocks={config.num_kvcache_blocks}, block={block_bytes / 1024**2:.2f} MB), "
+                    f"Allowed by limit: {allowed_kv_bytes / 1024**3:.2f} GB, "
+                    f"Free: {free / 1024**3:.2f} GB, Current: {current / 1024**3:.2f} GB, "
+                    f"Requested max_model_len={config.max_model_len}, max_num_seqs={config.max_num_seqs}."
+                )
         try:
             self.kv_cache = torch.empty(
                 2,
@@ -507,16 +533,18 @@ class ModelRunner:
                 self.block_size,
                 num_kv_heads,
                 head_dim,
-                device="cuda",
+                device=runtime_device,
                 dtype=self.dtype,
             )
         except RuntimeError as exc:
             if "out of memory" in str(exc).lower():
-                free_now, total_now = torch.cuda.mem_get_info()
+                extra = ""
+                if is_cuda_runtime:
+                    free_now, total_now = torch.cuda.mem_get_info()
+                    extra = f" Current free VRAM: {free_now / 1024**3:.2f} GB / {total_now / 1024**3:.2f} GB total."
                 raise RuntimeError(
                     f"Failed to allocate strict KV cache ({required_kv_bytes / 1024**3:.2f} GB) for "
-                    f"max_model_len={config.max_model_len}, max_num_seqs={config.max_num_seqs}. "
-                    f"Current free VRAM: {free_now / 1024**3:.2f} GB / {total_now / 1024**3:.2f} GB total."
+                    f"max_model_len={config.max_model_len}, max_num_seqs={config.max_num_seqs} on {runtime_device}.{extra}"
                 ) from exc
             raise
         for layer_id, module in enumerate(kv_cache_modules):
@@ -532,7 +560,7 @@ class ModelRunner:
             if not seq.block_table:
                 continue
             block_tables[row, :len(seq.block_table)] = torch.tensor(seq.block_table, dtype=torch.int32, device="cpu")
-        return block_tables.cuda(non_blocking=True)
+        return self._to_runtime_device(block_tables)
 
     def prepare_prefill(self, seqs: list[Sequence]):
         use_prompt_embeds = any(getattr(seq, "prompt_embeds", None) is not None for seq in seqs)
@@ -596,15 +624,17 @@ class ModelRunner:
             block_tables = self.prepare_block_tables(seqs)
         if use_prompt_embeds:
             input_ids = None
-            positions = torch.cat(prompt_position_ids, dim=1).unsqueeze(1).contiguous()
-            inputs_embeds = torch.cat(prompt_embeds, dim=0).unsqueeze(0).contiguous()
+            positions = self._to_runtime_device(torch.cat(prompt_position_ids, dim=1).unsqueeze(1).contiguous())
+            inputs_embeds = self._to_runtime_device(torch.cat(prompt_embeds, dim=0).unsqueeze(0).contiguous())
         else:
-            input_ids = torch.tensor(input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
-            positions = torch.tensor(positions, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
+            pin_memory = self._pin_memory_enabled()
+            input_ids = self._to_runtime_device(torch.tensor(input_ids, dtype=torch.int64, pin_memory=pin_memory))
+            positions = self._to_runtime_device(torch.tensor(positions, dtype=torch.int64, pin_memory=pin_memory))
             inputs_embeds = None
-        cu_seqlens_q = torch.tensor(cu_seqlens_q, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-        cu_seqlens_k = torch.tensor(cu_seqlens_k, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-        slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+        pin_memory = self._pin_memory_enabled()
+        cu_seqlens_q = self._to_runtime_device(torch.tensor(cu_seqlens_q, dtype=torch.int32, pin_memory=pin_memory))
+        cu_seqlens_k = self._to_runtime_device(torch.tensor(cu_seqlens_k, dtype=torch.int32, pin_memory=pin_memory))
+        slot_mapping = self._to_runtime_device(torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=pin_memory))
         set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, block_tables, has_previous_state=has_previous_state)
         return input_ids, positions, inputs_embeds
 
@@ -628,11 +658,11 @@ class ModelRunner:
             self._cpu_context_lens[i] = len(seq)
             self._cpu_slot_mapping[i] = seq.block_table[-1] * self.block_size + seq.last_block_num_tokens - 1
         
-        # Transfer to GPU using sliced views
-        input_ids = self._cpu_input_ids[:bs].cuda(non_blocking=True)
-        positions = self._cpu_positions[:bs].cuda(non_blocking=True)
-        slot_mapping = self._cpu_slot_mapping[:bs].cuda(non_blocking=True)
-        context_lens = self._cpu_context_lens[:bs].cuda(non_blocking=True)
+        # Transfer to the runtime device using sliced views
+        input_ids = self._to_runtime_device(self._cpu_input_ids[:bs])
+        positions = self._to_runtime_device(self._cpu_positions[:bs])
+        slot_mapping = self._to_runtime_device(self._cpu_slot_mapping[:bs])
+        context_lens = self._to_runtime_device(self._cpu_context_lens[:bs])
         block_tables = self.prepare_block_tables(seqs)
         set_context(False, slot_mapping=slot_mapping, context_lens=context_lens, block_tables=block_tables)
         return input_ids, positions
@@ -667,13 +697,13 @@ class ModelRunner:
             if seq.repetition_penalty is not None and seq.repetition_penalty != 1.0:
                 repetition_penalties_is_one = False
         
-        # Transfer to GPU using sliced views (single batched transfer)
-        temperatures = self._cpu_temperatures[:num_seqs].cuda(non_blocking=True)
-        cfg_scales = self._cpu_cfg_scales[:num_seqs].cuda(non_blocking=True)
-        top_ks = self._cpu_top_ks[:num_seqs].cuda(non_blocking=True) if not top_ks_is_zero else None
-        top_ps = self._cpu_top_ps[:num_seqs].cuda(non_blocking=True) if not top_ps_is_one else None
-        min_ps = self._cpu_min_ps[:num_seqs].cuda(non_blocking=True) if not min_ps_is_zero else None
-        repetition_penalties = self._cpu_repetition_penalties[:num_seqs].cuda(non_blocking=True) if not repetition_penalties_is_one else None
+        # Transfer to the runtime device using sliced views (single batched transfer)
+        temperatures = self._to_runtime_device(self._cpu_temperatures[:num_seqs])
+        cfg_scales = self._to_runtime_device(self._cpu_cfg_scales[:num_seqs])
+        top_ks = self._to_runtime_device(self._cpu_top_ks[:num_seqs]) if not top_ks_is_zero else None
+        top_ps = self._to_runtime_device(self._cpu_top_ps[:num_seqs]) if not top_ps_is_one else None
+        min_ps = self._to_runtime_device(self._cpu_min_ps[:num_seqs]) if not min_ps_is_zero else None
+        repetition_penalties = self._to_runtime_device(self._cpu_repetition_penalties[:num_seqs]) if not repetition_penalties_is_one else None
         
         return temperatures, cfg_scales, top_ks, top_ps, min_ps, repetition_penalties
 
@@ -720,16 +750,20 @@ class ModelRunner:
                 )
                 return self.model.compute_logits(self.model(**model_kwargs))
             
-            graph = self.graphs[next(x for x in self.graph_bs if x >= bs)]
+            graph_bs = next((x for x in self.graph_bs if x >= bs), None)
+            if graph_bs is None:
+                raise RuntimeError(f"CUDA graph batch size {bs} exceeds captured graph sizes {self.graph_bs} (max_num_seqs={self.config.max_num_seqs})")
+            graph = self.graphs[graph_bs]
             graph_vars = self.graph_vars
+            graph_vars["input_ids"][:graph_bs].zero_()
+            graph_vars["positions"][:graph_bs].zero_()
+            graph_vars["slot_mapping"][:graph_bs].fill_(self.config.num_kvcache_blocks * self.block_size - 1)
+            graph_vars["context_lens"][:graph_bs].zero_()
+            graph_vars["block_tables"][:graph_bs].fill_(-1)
             graph_vars["input_ids"][:bs] = input_ids
             graph_vars["positions"][:bs] = positions
-            graph_vars["slot_mapping"].fill_(-1)
             graph_vars["slot_mapping"][:bs] = context.slot_mapping
-            graph_vars["context_lens"].zero_()
             graph_vars["context_lens"][:bs] = context.context_lens
-            # Clear block_tables first to ensure no stale data from previous runs
-            graph_vars["block_tables"][:bs].fill_(-1)
             graph_vars["block_tables"][:bs, :context.block_tables.size(1)] = context.block_tables
             graph.replay()
             return self.model.compute_logits(graph_vars["outputs"][:bs])
@@ -768,7 +802,7 @@ class ModelRunner:
             
             if self.rank == 0:
                 # Split logits: first half is conditional, second half is unconditional
-                logits_cond = logits_all[:num_cond]
+                logits_cond = logits_all[:num_cond].clone()
                 logits_uncond = logits_all[num_cond:]
                 
                 # Apply repetition penalty to conditional logits (before CFG)
@@ -855,6 +889,7 @@ class ModelRunner:
             reset_context()
             
             if self.rank == 0:
+                logits = logits.clone()
                 # Apply repetition penalty to logits
                 if repetition_penalties is not None:
                     for i, seq in enumerate(seqs):
@@ -878,8 +913,6 @@ class ModelRunner:
                                 logits[i] = torch.where(token_mask, penalty_scores, logits[i])
                 
                 # Apply logits processor for constrained decoding (if any sequence has one)
-                # Clone logits to avoid in-place update issues in inference mode
-                logits = logits.clone()
                 for i, seq in enumerate(seqs):
                     bias = self._get_logits_bias(seq, logits)
                     if bias is not None:
@@ -919,6 +952,9 @@ class ModelRunner:
 
     @torch.inference_mode()
     def capture_cudagraph(self):
+        if self._get_runtime_device().type != "cuda":
+            self.enforce_eager = True
+            return
         config = self.config
         cache_key = (config.max_model_len, config.max_num_seqs)
         model_device = torch.device("cuda") if torch.cuda.is_available() else self._get_model_device()
@@ -934,7 +970,8 @@ class ModelRunner:
                     self._graph_cache_order.remove(cache_key)
                 self._graph_cache_order.append(cache_key)
                 return
-                self._drop_graph_cache_entry(cache_key)
+            # signature mismatch: free the stale graphs before capturing new ones
+            self._drop_graph_cache_entry(cache_key)
         hf_config = config.hf_config
         max_bs = min(self.config.max_num_seqs, 512)
         max_num_blocks = (config.max_model_len + self.block_size - 1) // self.block_size
@@ -948,6 +985,9 @@ class ModelRunner:
         self.graph_bs = [bs for bs in base_graph_bs if bs <= max_bs]
         if max_bs > 8:
             self.graph_bs.extend(range(16, max_bs + 1, 16))
+        if max_bs not in self.graph_bs:
+            self.graph_bs.append(max_bs)
+            self.graph_bs.sort()
         if not self.graph_bs:
             self.graph_bs = [max_bs]
         self.graphs = {}

@@ -6,6 +6,7 @@ from typing import Optional
 
 import torch
 
+from shared.mps import mps_device_or
 from shared.utils import files_locator as fl
 
 from .prompt_enhancers import TTS_MONOLOGUE_PROMPT, TTS_QWEN3_DIALOGUE_PROMPT
@@ -125,14 +126,19 @@ QWEN3_TTS_AUDIO_PROMPT_TYPE_SOURCES = {
     "default": "A",
 }
 QWEN3_TTS_AUTO_SPLIT_SETTING_ID = "auto_split_every_s"
+QWEN3_TTS_AUTO_SPLIT_DISABLED_SECONDS = 0.0
 QWEN3_TTS_AUTO_SPLIT_MIN_SECONDS = 5.0
 QWEN3_TTS_AUTO_SPLIT_MAX_SECONDS = 90.0
 QWEN3_TTS_CUSTOM_SETTINGS = [
     {
         "id": QWEN3_TTS_AUTO_SPLIT_SETTING_ID,
-        "label": "Auto Split Every s (5-90, optional), may reduce VRAM requiremens for very long speeches.",
+        "label": "Auto Split s (0 = Auto, 5-90)",
         "name": "Auto Split Every s",
         "type": "float",
+        "default": QWEN3_TTS_AUTO_SPLIT_DISABLED_SECONDS,
+        "min": QWEN3_TTS_AUTO_SPLIT_DISABLED_SECONDS,
+        "max": QWEN3_TTS_AUTO_SPLIT_MAX_SECONDS,
+        "inc": 1.0,
     },
 ]
 
@@ -386,7 +392,7 @@ class family_handler:
             model_weights_path=weights_path,
             base_model_type=base_model_type,
             ckpt_root=ckpt_root,
-            device=torch.device("cpu"),
+            device=mps_device_or(torch.device("cpu")),
             lm_decoder_engine=lm_decoder_engine,
         )
         if str(lm_decoder_engine).strip().lower() in ("cg", "cudagraph"):
@@ -583,6 +589,10 @@ class family_handler:
                 f"{int(QWEN3_TTS_AUTO_SPLIT_MIN_SECONDS)} and {int(QWEN3_TTS_AUTO_SPLIT_MAX_SECONDS)} seconds."
             )
 
+        if auto_split_seconds == QWEN3_TTS_AUTO_SPLIT_DISABLED_SECONDS:
+            custom_settings.pop(QWEN3_TTS_AUTO_SPLIT_SETTING_ID, None)
+            inputs["custom_settings"] = custom_settings if len(custom_settings) > 0 else None
+            return None
         if (
             auto_split_seconds < QWEN3_TTS_AUTO_SPLIT_MIN_SECONDS
             or auto_split_seconds > QWEN3_TTS_AUTO_SPLIT_MAX_SECONDS
