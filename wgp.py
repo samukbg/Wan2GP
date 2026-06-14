@@ -12320,7 +12320,6 @@ def create_ui():
         gr.Interface(fn=take_screenshot, inputs="json", outputs="file", api_name="take_screenshot")
 
         # Motion API (Framer Motion)
-        from wgp import motion_api_handler
         gr.Interface(
             fn=motion_api_handler,
             inputs=[gr.Textbox(label="Animation Description")],
