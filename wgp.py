@@ -13085,6 +13085,10 @@ def get_js():
 
     return start_quit_timer_js, cancel_quit_timer_js, trigger_zip_download_js, trigger_settings_download_js, click_brush_js
 
+def get_all_model_types():
+    global model_types
+    return list(model_types)
+
 def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None):
     """
     A dedicated wrapper for the /generate API endpoint.
