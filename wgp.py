@@ -14098,7 +14098,7 @@ if __name__ == "__main__":
         else:
             url = "http://" + server_name
         webbrowser.open(url + ":" + str(server_port), new = 0, autoraise = True)
-    demo, local_url, share_url = demo.launch(
+    gradio_app, local_url, share_url = demo.launch(
         favicon_path="favicon.png",
         server_name=server_name,
         server_port=server_port,
@@ -14109,7 +14109,7 @@ if __name__ == "__main__":
 
     # Mount custom workflow endpoints
     from workflow_endpoints import setup_workflow_endpoints
-    setup_workflow_endpoints(demo.app)
+    setup_workflow_endpoints(gradio_app)
     print(f"Workflow endpoints mounted on {local_url}")
 
     demo.block_thread()
