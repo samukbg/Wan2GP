@@ -1,0 +1,10 @@
+{
+    "description": "Optimized profile for Ideogram 4 on GPUs with 12GB-16GB VRAM. Uses aggressive offloading and CPU offload for text encoders.",
+    "profile": 5,
+    "image_profile": 5,
+    "video_profile": 5,
+    "pinnedMemory": false,
+    "quantizeTransformer": true,
+    "transformer_quantization": "quanto_int8",
+    "text_encoder_quantization": "quanto_int8"
+}

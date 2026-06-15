@@ -1,4 +1,4 @@
-import os, sys
+import os, sys, traceback
 os.environ["GRADIO_LANG"] = "en"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "garbage_collection_threshold:0.5"
 
@@ -12797,7 +12797,7 @@ def generate_media_tab(update_form = False, state_dict = None, ui_defaults = Non
 
                 model_choice.input(fn=_model_choice_target_value, inputs=[model_choice], outputs=[model_choice_target], show_progress="hidden", queue=False)
             
-                generate_btn.click(fn = init_generate, inputs = [state, output, last_choice, audio_files_paths, audio_file_selected], outputs=[generate_trigger, mode])
+                generate_btn.click(fn = init_generate, inputs = [state, output, last_choice, audio_files_paths, audio_file_selected], outputs=[generate_trigger, mode], api_name=False)
                 add_to_queue_btn.click(fn = lambda : (get_unique_id(), ""), inputs = None, outputs=[add_to_queue_trigger, mode])
                 # gr.on(triggers=[add_to_queue_btn.click, add_to_queue_trigger.change],fn=validate_wizard_prompt, 
                 add_to_queue_trigger.change(fn=validate_wizard_prompt, 
@@ -13143,6 +13143,60 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
     offload.flush_torch_caches()
     gc.collect()
 
+    # Define helper to handle remote URLs for API calls
+    def download_url_to_temp(url):
+        if not url or not isinstance(url, str) or not url.startswith("http"): return url
+        import requests, tempfile, hashlib
+        try:
+            ext = url.split('.')[-1].split('?')[0].lower()
+            if len(ext) > 4 or len(ext) < 2: ext = "bin"
+            cache_name = hashlib.md5(url.encode()).hexdigest() + "." + ext
+            temp_path = os.path.join(tempfile.gettempdir(), cache_name)
+            if os.path.exists(temp_path): return temp_path
+            print(f"[API] Downloading {url}...")
+            r = requests.get(url, timeout=30)
+            with open(temp_path, 'wb') as f: f.write(r.content)
+            return temp_path
+        except Exception as e:
+            print(f"[API] Failed to download {url}: {e}")
+            return url
+
+    # Soft Safety: Adapt prompt for ideogram4 to prevent explicit content
+    if model_type == "ideogram4":
+        import json
+        safety_suffix = " (professional attire, elegant, highly detailed, photorealistic, SFW, no nudity, no explicit content, modest clothing)"
+        
+        is_json = False
+        parsed_prompt = prompt
+        
+        # Try to parse string as JSON
+        if isinstance(prompt, str):
+            try:
+                parsed_prompt = json.loads(prompt)
+                is_json = True
+            except:
+                pass
+                
+        # Adapt prompt
+        if isinstance(parsed_prompt, dict) and "high_level_description" in parsed_prompt:
+            desc = parsed_prompt["high_level_description"]
+            if isinstance(desc, str):
+                desc_lower = desc.lower()
+                if "naked" in desc_lower or "nude" in desc_lower or "porn" in desc_lower or "nsfw" in desc_lower:
+                    desc = desc_lower.replace("naked", "fully clothed").replace("nude", "dressed").replace("porn", "cinematic").replace("nsfw", "sfw")
+                parsed_prompt["high_level_description"] = desc + safety_suffix
+        elif isinstance(parsed_prompt, str):
+            desc_lower = parsed_prompt.lower()
+            if "naked" in desc_lower or "nude" in desc_lower or "porn" in desc_lower or "nsfw" in desc_lower:
+                 parsed_prompt = desc_lower.replace("naked", "fully clothed").replace("nude", "dressed").replace("porn", "cinematic").replace("nsfw", "sfw")
+            parsed_prompt += safety_suffix
+            
+        # Re-serialize if necessary
+        if is_json:
+            prompt = json.dumps(parsed_prompt)
+        else:
+            prompt = parsed_prompt
+
     # Get the default settings dictionary for the selected model
     params = get_default_settings(model_type)
     
@@ -13479,17 +13533,54 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
     expected_args = set(sig.parameters.keys())
     final_params = {k: v for k, v in params.items() if k in expected_args}
 
-    result_path = generate_media(**final_params)
+    print(f"[API /generate] Starting generation for model: {model_type}")
+    generate_media(**final_params)
 
-    if isinstance(result_path, list) and len(result_path) > 0:
-        result_path = result_path[0]
+    # Extract the resulting path from the state
+    gen = state.get("gen", {})
+    file_list = gen.get("file_list", [])
+    audio_file_list = gen.get("audio_file_list", [])
+    
+    print(f"[API /generate] Generation finished. State file_list size: {len(file_list)}")
+    
+    result_path = None
+    if gen.get("last_was_audio", False) and audio_file_list:
+        result_path = audio_file_list[-1]
+    elif file_list:
+        result_path = file_list[-1]
 
-    if not result_path or result_path is False:
-        error_msg = captured_error[0] or "Generation failed — check server console for details."
+    # Fallback: If state is empty but we know a file was saved (from logs), 
+    # find the most recent file in the output directory.
+    if result_path is None:
+        print("[API /generate] Warning: Result path not found in state. Searching filesystem...")
+        search_dirs = [image_save_path, audio_save_path, save_path]
+        latest_file = None
+        latest_time = 0
+        for d in set(search_dirs):
+            if not os.path.isdir(d): continue
+            for f in os.listdir(d):
+                if f.startswith("2026-") or "seed" in f: # Match typical WanGP filename patterns
+                    full_p = os.path.join(d, f)
+                    if os.path.isfile(full_p):
+                        mtime = os.path.getmtime(full_p)
+                        if mtime > latest_time:
+                            latest_time = mtime
+                            latest_file = full_p
+        
+        # Only use fallback if the file is very recent (last 30 seconds)
+        if latest_file and (time.time() - latest_time) < 30:
+            result_path = latest_file
+            print(f"[API /generate] Fallback success: Found recent file '{result_path}'")
+
+    # If result_path is still None, check if an error was captured
+    if result_path is None:
+        error_msg = captured_error[0] or "Generation finished without error but produced no output file (likely Test Mode)."
         raise gr.Error(error_msg)
 
+    # Final check for valid file path
     if not (isinstance(result_path, str) and os.path.exists(result_path)):
-        raise gr.Error(f"Generation produced no output file at '{result_path}'.")
+        error_msg = captured_error[0] or f"Generation produced no output file at '{result_path}'."
+        raise gr.Error(error_msg)
 
     def delayed_delete(path, delay=300):
         import time
@@ -13745,82 +13836,113 @@ def create_ui():
             app.setup_ui_tabs(main_tabs, state, generator_tab_components["set_save_form_event"])
         if stats_app is not None:
             stats_app.setup_events(main, state)
-        def render_video_gradio_api(data):
-            from workflow_endpoints import render_video_task
-            import uuid, os, threading, json
-            if isinstance(data, str):
-                try: data = json.loads(data)
-                except: return {"status": "failed", "error": "Invalid JSON string provided"}
-            execution_id = data.get("execution_id", str(uuid.uuid4()))
-            threading.Thread(target=render_video_task, args=(data, execution_id), daemon=True).start()
-            return {"status": "started", "execution_id": execution_id}
 
-        def render_hyperframes_gradio_api(data):
-            from workflow_endpoints import render_hyperframes_task
-            import uuid, os, threading, json
-            if isinstance(data, str):
-                try: data = json.loads(data)
-                except: return {"status": "failed", "error": "Invalid JSON string provided"}
-            execution_id = data.get("execution_id", str(uuid.uuid4()))
-            threading.Thread(target=render_hyperframes_task, args=(data, execution_id), daemon=True).start()
-            return {"status": "started", "execution_id": execution_id}
+        # --- Robust API Endpoints via Hidden Components (Gradio 5 Compatible) ---
+        with gr.Row(visible=False):
+            api_model_type = gr.Textbox(label="model_type")
+            api_prompt = gr.Textbox(label="prompt")
+            api_num_inference_steps = gr.Number(label="num_inference_steps")
+            api_guidance_scale = gr.Number(label="guidance_scale")
+            api_resolution = gr.Textbox(label="resolution")
+            api_video_length = gr.Textbox(label="video_length")
+            api_seed = gr.Number(label="seed")
+            api_image_mode = gr.Checkbox(label="image_mode")
+            api_denoising_strength = gr.Number(label="denoising_strength")
+            api_image_start = gr.Textbox(label="image_start")
+            api_image_end = gr.Textbox(label="image_end")
+            api_audio_input = gr.Textbox(label="audio_input")
+            api_override_profile = gr.Number(label="override_profile")
+            api_masking_strength = gr.Number(label="masking_strength")
 
-        def hyperframes_tts_gradio_api(data):
-            from workflow_endpoints import hyperframes_tts_task
-            import uuid, os, threading, json
-            if isinstance(data, str):
-                try: data = json.loads(data)
-                except: return {"status": "failed", "error": "Invalid JSON string provided"}
-            execution_id = data.get("execution_id", str(uuid.uuid4()))
-            threading.Thread(target=hyperframes_tts_task, args=(data, execution_id), daemon=True).start()
-            return {"status": "started", "execution_id": execution_id}
+            api_gen_btn = gr.Button("api_gen_btn")
+            api_gen_btn.click(
+                fn=api_endpoint_handler,
+                inputs=[
+                    api_model_type, api_prompt, api_num_inference_steps, api_guidance_scale,
+                    api_resolution, api_video_length, api_seed, api_image_mode,
+                    api_denoising_strength, api_image_start, api_image_end,
+                    api_audio_input, api_override_profile, api_masking_strength
+                ],
+                outputs=gr.File(),
+                api_name="wan2gp_generate"
+            )
 
-        def hyperframes_transcribe_gradio_api(data):
-            from workflow_endpoints import hyperframes_transcribe_task
-            import uuid, os, threading, json
-            if isinstance(data, str):
-                try: data = json.loads(data)
-                except: return {"status": "failed", "error": "Invalid JSON string provided"}
-            execution_id = data.get("execution_id", str(uuid.uuid4()))
-            threading.Thread(target=hyperframes_transcribe_task, args=(data, execution_id), daemon=True).start()
-            return {"status": "started", "execution_id": execution_id}
+            # Define utility functions for APIs
+            def render_video_gradio_api(data):
+                from workflow_endpoints import render_video_task
+                import uuid, os, threading, json
+                if isinstance(data, str):
+                    try: data = json.loads(data)
+                    except: return {"status": "failed", "error": "Invalid JSON string provided"}
+                execution_id = data.get("execution_id", str(uuid.uuid4()))
+                threading.Thread(target=render_video_task, args=(data, execution_id), daemon=True).start()
+                return {"status": "started", "execution_id": execution_id}
 
-        def render_status_gradio_api(execution_id):
-            from workflow_endpoints import get_render_status
-            return get_render_status(execution_id)
+            def render_hyperframes_gradio_api(data):
+                from workflow_endpoints import render_hyperframes_task
+                import uuid, os, threading, json
+                if isinstance(data, str):
+                    try: data = json.loads(data)
+                    except: return {"status": "failed", "error": "Invalid JSON string provided"}
+                execution_id = data.get("execution_id", str(uuid.uuid4()))
+                threading.Thread(target=render_hyperframes_task, args=(data, execution_id), daemon=True).start()
+                return {"status": "started", "execution_id": execution_id}
 
-    gr.Interface(
-        fn=api_endpoint_handler,
-        inputs=[
-            gr.Dropdown(choices=get_all_model_types(), label="model_type"),
-            gr.Textbox(label="prompt"),
-            gr.Number(label="num_inference_steps"),
-            gr.Number(label="guidance_scale"),
-            gr.Textbox(label="resolution"),
-            gr.Textbox(label="video_length"),
-            gr.Number(label="seed"),
-            gr.Checkbox(label="image_mode"),
-            gr.Number(label="denoising_strength", value=None),
-            gr.Image(label="image_start", type="pil"),
-            gr.Image(label="image_end", type="pil"),
-            gr.Audio(label="audio_input", type="filepath"),
-            gr.Number(label="override_profile", value=-1),
-            gr.Number(label="masking_strength", value=None)
-        ],
-        outputs=gr.File(),
-        api_name="generate"
-    )
+            def hyperframes_tts_gradio_api(data):
+                from workflow_endpoints import hyperframes_tts_task
+                import uuid, os, threading, json
+                if isinstance(data, str):
+                    try: data = json.loads(data)
+                    except: return {"status": "failed", "error": "Invalid JSON string provided"}
+                execution_id = data.get("execution_id", str(uuid.uuid4()))
+                threading.Thread(target=hyperframes_tts_task, args=(data, execution_id), daemon=True).start()
+                return {"status": "started", "execution_id": execution_id}
 
-    gr.Interface(fn=motion_api_handler, inputs=[gr.Textbox(label="description")], outputs=gr.Code(language="json"), api_name="motion")
-    gr.Interface(fn=api_unload_handler, inputs=[], outputs=gr.Textbox(), api_name="unload")
-    gr.Interface(fn=_resource_status, inputs=[], outputs=gr.JSON(), api_name="resource_status")
-    gr.Interface(fn=render_video_gradio_api, inputs=[gr.JSON(label="data")], outputs=gr.JSON(), api_name="render_video")
-    gr.Interface(fn=render_hyperframes_gradio_api, inputs=[gr.JSON(label="data")], outputs=gr.JSON(), api_name="render_hyperframes")
-    gr.Interface(fn=hyperframes_tts_gradio_api, inputs=[gr.JSON(label="data")], outputs=gr.JSON(), api_name="hyperframes_tts")
-    gr.Interface(fn=hyperframes_transcribe_gradio_api, inputs=[gr.JSON(label="data")], outputs=gr.JSON(), api_name="hyperframes_transcribe")
-    gr.Interface(fn=render_status_gradio_api, inputs=[gr.Textbox(label="execution_id")], outputs=gr.JSON(), api_name="render_status")
+            def hyperframes_transcribe_gradio_api(data):
+                from workflow_endpoints import hyperframes_transcribe_task
+                import uuid, os, threading, json
+                if isinstance(data, str):
+                    try: data = json.loads(data)
+                    except: return {"status": "failed", "error": "Invalid JSON string provided"}
+                execution_id = data.get("execution_id", str(uuid.uuid4()))
+                threading.Thread(target=hyperframes_transcribe_task, args=(data, execution_id), daemon=True).start()
+                return {"status": "started", "execution_id": execution_id}
 
-    return main
+            def render_status_gradio_api(execution_id):
+                from workflow_endpoints import get_render_status
+                return get_render_status(execution_id)
+
+            # Other utility APIs
+            api_motion_desc = gr.Textbox(label="description")
+            api_motion_btn = gr.Button("api_motion_btn")
+            api_motion_btn.click(fn=motion_api_handler, inputs=[api_motion_desc], outputs=gr.Code(language="json"), api_name="motion")
+
+            api_unload_btn = gr.Button("api_unload_btn")
+            api_unload_btn.click(fn=api_unload_handler, inputs=[], outputs=gr.Textbox(), api_name="unload")
+
+            api_res_status_btn = gr.Button("api_res_status_btn")
+            api_res_status_btn.click(fn=_resource_status, inputs=[], outputs=gr.JSON(), api_name="resource_status")
+
+            api_render_data = gr.JSON(label="data")
+            api_render_video_btn = gr.Button("api_render_video_btn")
+            api_render_video_btn.click(fn=render_video_gradio_api, inputs=[api_render_data], outputs=gr.JSON(), api_name="render_video")
+
+            api_render_hyper_btn = gr.Button("api_render_hyper_btn")
+            api_render_hyper_btn.click(fn=render_hyperframes_gradio_api, inputs=[api_render_data], outputs=gr.JSON(), api_name="render_hyperframes")
+
+            api_tts_btn = gr.Button("api_tts_btn")
+            api_tts_btn.click(fn=hyperframes_tts_gradio_api, inputs=[api_render_data], outputs=gr.JSON(), api_name="hyperframes_tts")
+
+            api_transcribe_btn = gr.Button("api_transcribe_btn")
+            api_transcribe_btn.click(fn=hyperframes_transcribe_gradio_api, inputs=[api_render_data], outputs=gr.JSON(), api_name="hyperframes_transcribe")
+
+            api_render_status_id = gr.Textbox(label="execution_id")
+            api_render_status_btn = gr.Button("api_render_status_btn")
+            api_render_status_btn.click(fn=render_status_gradio_api, inputs=[api_render_status_id], outputs=gr.JSON(), api_name="render_status")
+
+        return main
+
+
 
 def clear_startup_lock():
     if os.path.exists(STARTUP_LOCK_FILE):
