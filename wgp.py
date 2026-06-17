@@ -21,7 +21,11 @@ from shared.default_device import set_default_cuda_device_from_arg; set_default_
 from shared.utils.resource_guard import acquire_generation_slot, release_generation_slot, resource_status as _resource_status
 # # os.environ.pop("TORCH_LOGS", None)  # make sure no env var is suppressing/overriding
 # os.environ["TORCH_LOGS"]= "recompiles"
+import torch
 import torch._logging as tlog
+if hasattr(torch.cuda, "ipc_collect") and os.name == "nt":
+    torch.cuda.ipc_collect = lambda: None
+
 # tlog.set_logs(recompiles=True, guards=True, graph_breaks=True)
 # from shared.utils.crash_diagnostics import install_wgp_crash_diagnostics; install_wgp_crash_diagnostics(__file__)
 # Ensure plugin-side `import wgp` resolves to this live module instance.
