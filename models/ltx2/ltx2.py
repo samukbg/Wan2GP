@@ -955,7 +955,7 @@ class LTX2:
             id_signature = "id-lora-celebvhq-ltx2.3" if resolved_base_model_type == "ltx2_22B" else "id-lora-celebvhq-ltx2"
             _append_system_lora("id", 1.0 if guidance_phases == 1 else "1;0", id_signature)
         
-        _append_preload_lora("transition", 1.0)
+        _append_system_lora("transition", 1.0, "transition")
         return loras, loras_mult
 
     def generate(
