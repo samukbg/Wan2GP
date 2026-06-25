@@ -507,6 +507,7 @@ async def record_website(payload):
     duration = payload.get("duration", 5)
     width = payload.get("width", 720)
     height = payload.get("height", 1280)
+    wait_for_network_idle = payload.get("wait_for_network_idle", False)
     
     output_filename = f"record_{uuid.uuid4()}.mp4"
     output_path = os.path.join("outputs", output_filename)
@@ -520,6 +521,11 @@ async def record_website(payload):
         )
         page = await context.new_page()
         await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        if wait_for_network_idle:
+            try:
+                await page.wait_for_load_state("networkidle", timeout=30000)
+            except Exception as e:
+                print(f"wait_for_load_state timeout: {e}")
         await asyncio.sleep(2) # Wait for initial render
         
         # Simple linear scroll logic
