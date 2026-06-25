@@ -3929,7 +3929,7 @@ def load_models(model_type, override_profile = -1, output_type="video", **model_
     if quantizeTransformer or "quanto" in model_filename:
         transformer_dtype = torch.bfloat16 if "bf16" in model_filename or "BF16" in model_filename else transformer_dtype
         transformer_dtype = torch.float16 if "fp16" in model_filename or"FP16" in model_filename else transformer_dtype
-    perc_reserved_mem_max = args.perc_reserved_mem_max
+    perc_reserved_mem_max = args.perc_reserved_mem_max if args.perc_reserved_mem_max > 0 else server_config.get("perc_reserved_mem_max", 0)
     vram_safety_coefficient = args.vram_safety_coefficient 
     model_file_list = [model_filename]
     model_type_list = [model_type]

@@ -1,5 +1,6 @@
 {
     "attention_mode": "auto",
+    "perc_reserved_mem_max": 0,
     "transformer_types": [],
     "transformer_quantization": "int8",
     "text_encoder_quantization": "int8",
