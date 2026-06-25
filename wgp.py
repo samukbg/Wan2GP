@@ -13913,6 +13913,14 @@ def create_ui():
                 threading.Thread(target=hyperframes_transcribe_task, args=(data, execution_id), daemon=True).start()
                 return {"status": "started", "execution_id": execution_id}
 
+            async def record_website_gradio_api(data):
+                from workflow_endpoints import record_website
+                import json
+                if isinstance(data, str):
+                    try: data = json.loads(data)
+                    except: return {"status": "failed", "error": "Invalid JSON string provided"}
+                return await record_website(data)
+
             def render_status_gradio_api(execution_id):
                 from workflow_endpoints import get_render_status
                 return get_render_status(execution_id)
@@ -13940,6 +13948,9 @@ def create_ui():
 
             api_transcribe_btn = gr.Button("api_transcribe_btn")
             api_transcribe_btn.click(fn=hyperframes_transcribe_gradio_api, inputs=[api_render_data], outputs=gr.JSON(), api_name="hyperframes_transcribe")
+
+            api_record_website_btn = gr.Button("api_record_website_btn")
+            api_record_website_btn.click(fn=record_website_gradio_api, inputs=[api_render_data], outputs=gr.JSON(), api_name="record_website")
 
             api_render_status_id = gr.Textbox(label="execution_id")
             api_render_status_btn = gr.Button("api_render_status_btn")
