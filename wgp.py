@@ -13880,7 +13880,10 @@ def create_ui():
                     try: data = json.loads(data)
                     except: return {"status": "failed", "error": "Invalid JSON string provided"}
                 execution_id = data.get("execution_id", str(uuid.uuid4()))
-                threading.Thread(target=render_video_task, args=(data, execution_id), daemon=True).start()
+                output_filename = f"render_{execution_id}.mp4"
+                output_path = os.path.join("outputs", output_filename)
+                os.makedirs("outputs", exist_ok=True)
+                threading.Thread(target=render_video_task, args=(data, output_path, execution_id), daemon=True).start()
                 return {"status": "started", "execution_id": execution_id}
 
             def render_hyperframes_gradio_api(data):
@@ -13890,7 +13893,11 @@ def create_ui():
                     try: data = json.loads(data)
                     except: return {"status": "failed", "error": "Invalid JSON string provided"}
                 execution_id = data.get("execution_id", str(uuid.uuid4()))
-                threading.Thread(target=render_hyperframes_task, args=(data, execution_id), daemon=True).start()
+                fmt = data.get("format", "mp4")
+                output_filename = f"hyper_{execution_id}.{fmt}"
+                output_path = os.path.join("outputs", output_filename)
+                os.makedirs("outputs", exist_ok=True)
+                threading.Thread(target=render_hyperframes_task, args=(data, output_path, execution_id), daemon=True).start()
                 return {"status": "started", "execution_id": execution_id}
 
             def hyperframes_tts_gradio_api(data):
@@ -13900,17 +13907,28 @@ def create_ui():
                     try: data = json.loads(data)
                     except: return {"status": "failed", "error": "Invalid JSON string provided"}
                 execution_id = data.get("execution_id", str(uuid.uuid4()))
-                threading.Thread(target=hyperframes_tts_task, args=(data, execution_id), daemon=True).start()
+                output_path = os.path.join("outputs", f"tts_{execution_id}.wav")
+                os.makedirs("outputs", exist_ok=True)
+                threading.Thread(target=hyperframes_tts_task, args=(data, output_path, execution_id), daemon=True).start()
                 return {"status": "started", "execution_id": execution_id}
 
             def hyperframes_transcribe_gradio_api(data):
-                from workflow_endpoints import hyperframes_transcribe_task
-                import uuid, os, threading, json
+                from workflow_endpoints import hyperframes_transcribe_task, download_file
+                import uuid, os, threading, json, tempfile
                 if isinstance(data, str):
                     try: data = json.loads(data)
                     except: return {"status": "failed", "error": "Invalid JSON string provided"}
                 execution_id = data.get("execution_id", str(uuid.uuid4()))
-                threading.Thread(target=hyperframes_transcribe_task, args=(data, execution_id), daemon=True).start()
+                input_url = data.get("url")
+                if not input_url: return {"status": "failed", "error": "Missing 'url'"}
+                temp_input = os.path.join(tempfile.gettempdir(), f"transcribe_{execution_id}")
+                def transcribe_flow():
+                    try:
+                        download_file(input_url, temp_input)
+                        hyperframes_transcribe_task(data, temp_input, execution_id)
+                    finally:
+                        if os.path.exists(temp_input): os.remove(temp_input)
+                threading.Thread(target=transcribe_flow, daemon=True).start()
                 return {"status": "started", "execution_id": execution_id}
 
             async def record_website_gradio_api(data):
