@@ -28,7 +28,7 @@
     "save_queue_if_crash": 1,
     "queue_color_scheme": "pastel",
     "model_hierarchy_type": 1,
-    "mmaudio_mode": 0,
+    "mmaudio_mode": 1,
     "mmaudio_persistence": 1,
     "rife_version": "v4",
     "prompt_enhancer_temperature": 0.6,
@@ -46,7 +46,8 @@
         "wan2_2": "vace_14B_2_2",
         "wan": "infinitetalk",
         "ltxv": "ltxv_13B",
-        "flux2": "flux2_klein_9b"
+        "flux2": "flux2_klein_9b",
+        "ideogram4": "ideogram4"
     },
     "last_model_per_type": {
         "ltx2_19B": "ltx2_19B",
@@ -59,13 +60,15 @@
         "ltxv_13B": "ltxv_13B",
         "flux2_dev": "flux2_dev",
         "flux2_klein_9b": "flux2_klein_9b",
-        "pi_flux2": "pi_flux2"
+        "pi_flux2": "pi_flux2",
+        "ideogram4": "ideogram4",
+        "joyai_echo": "joyai_echo"
     },
     "last_model_type": "ltx2_22B_distilled_1_1",
-    "last_resolution_choice": "1280x720",
+    "last_resolution_choice": "720x1280",
     "last_resolution_per_group": {
-        "720p": "1280x720",
-        "480p": "512x512",
+        "720p": "720x1280",
+        "480p": "832x480",
         "1080p": "832x1920"
     },
     "last_advanced_choice": true,
@@ -73,7 +76,7 @@
     "process_queues_when_browser_unfocused": 1,
     "matanyone_version": "v2",
     "keep_intermediate_sliding_windows": 1,
-    "deepy_enabled": 0,
+    "deepy_enabled": 1,
     "deepy_vram_mode": "unload",
     "deepy_tool_gen_image": "Z Image Turbo",
     "deepy_tool_edit_image": "Flux Klein 9B",
@@ -86,7 +89,31 @@
     "deepy_auto_cancel_queue_tasks": true,
     "deepy_separate_requests_with_empty_line": true,
     "enabled_plugins": [
-        "wan2gp-motion-designer"
+        "motion_designer"
     ],
-    "motion_designer_bundled_migrated": 1
+    "motion_designer_bundled_migrated": 1,
+    "multi_prompts_gen_type": "PG",
+    "mmaudio_enabled": 1,
+    "seedvc_mode": 2,
+    "seedvc_persistence": 1,
+    "enhancer_enabled": 3,
+    "spatial_upsamplers": {
+        "flashvsr": {
+            "mode": 1,
+            "persistence": 1,
+            "backend": "auto",
+            "topk_ratio": 0.0
+        },
+        "pid": {
+            "tiling_threshold": 0,
+            "persistence": 1
+        },
+        "chain_of_zoom": {
+            "persistence": 1,
+            "parallel_tile_processing": "auto"
+        }
+    },
+    "extensions_defaults_version": "1.15",
+    "installed_remote_plugins": [],
+    "hdr_video_crf": 8
 }

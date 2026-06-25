@@ -534,7 +534,7 @@ def create_sampling_ui(stable_audio_3_model, default_prompt=None):
             audio_output,
             audio_spectrogram_output
         ],
-        api_name="generate")
+        api_name="generate_audio")
 
     def _prompt_assistant_or_download(text, progress=gr.Progress(track_tqdm=True)):
         if not _reprompt_is_model_cached(_reprompt_model_id):
