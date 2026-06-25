@@ -281,6 +281,20 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
             if "index.html" not in files:
                 raise ValueError("Either 'html', 'html_url', or 'index.html' in 'files' must be provided")
             
+        duration = data.get("duration")
+        if duration is not None:
+            import re
+            with open(index_path, 'r', encoding='utf-8') as f:
+                html = f.read()
+            html = re.sub(r'data-composition-duration="[^"]+"', f'data-composition-duration="{duration}"', html)
+            inject_script = f"\n<script>window.__hf = window.__hf || {{}}; window.__hf.duration = {duration};</script>\n"
+            if '</head>' in html:
+                html = html.replace('</head>', f'{inject_script}</head>')
+            else:
+                html += inject_script
+            with open(index_path, 'w', encoding='utf-8') as f:
+                f.write(html)
+                
         executions[execution_id]["progress"] = 10
         
         tsx_content = data.get("tsx")
