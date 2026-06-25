@@ -249,7 +249,7 @@ async def render_video(request: Request, background_tasks: BackgroundTasks):
     }
 
 @router.get("/render_status/{execution_id}")
-async def get_render_status(execution_id: str):
+def get_render_status(execution_id: str):
     status = executions.get(execution_id)
     if not status:
         return JSONResponse({"error": "Execution ID not found"}, status_code=404)
