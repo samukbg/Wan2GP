@@ -13,7 +13,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from shared.ffmpeg_setup import download_ffmpeg
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
 router = APIRouter()
 
@@ -511,7 +511,7 @@ async def record_website(payload):
     skip_start = payload.get("skip_start", 0)
     
     output_filename = f"record_{uuid.uuid4()}.mp4"
-    output_path = os.path.join("outputs", output_filename)
+    output_path = os.path.abspath(os.path.join("outputs", output_filename))
     os.makedirs("outputs", exist_ok=True)
     
     async with async_playwright() as p:
@@ -524,9 +524,11 @@ async def record_website(payload):
         await page.goto(url, wait_until="domcontentloaded", timeout=60000)
         if wait_for_network_idle:
             try:
-                await page.wait_for_load_state("networkidle", timeout=30000)
+                await page.wait_for_load_state("networkidle", timeout=60000)
+            except PlaywrightTimeoutError:
+                await asyncio.sleep(5)
             except Exception as e:
-                print(f"wait_for_load_state timeout: {e}")
+                print(f"wait_for_load_state exception: {e}")
         await asyncio.sleep(2) # Wait for initial render
         
         # Simple linear scroll logic
@@ -542,7 +544,15 @@ async def record_website(payload):
         # Rename or trim the playwright generated video to our final path
         if skip_start > 0:
             import subprocess
-            subprocess.run(["ffmpeg", "-y", "-ss", str(skip_start), "-i", video_path, "-c", "copy", output_path], check=True, capture_output=True)
+            subprocess.run([
+                "ffmpeg", "-y",
+                "-ss", str(skip_start),
+                "-i", video_path,
+                "-c:v", "libx264",
+                "-c:a", "aac",
+                "-movflags", "+faststart",
+                output_path
+            ], check=True, capture_output=True)
             os.remove(video_path)
         else:
             os.rename(video_path, output_path)
