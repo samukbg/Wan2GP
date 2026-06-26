@@ -508,6 +508,7 @@ async def record_website(payload):
     width = payload.get("width", 720)
     height = payload.get("height", 1280)
     wait_for_network_idle = payload.get("wait_for_network_idle", False)
+    skip_start = payload.get("skip_start", 0)
     
     output_filename = f"record_{uuid.uuid4()}.mp4"
     output_path = os.path.join("outputs", output_filename)
@@ -538,8 +539,13 @@ async def record_website(payload):
         await context.close()
         await browser.close()
         
-        # Rename the playwright generated video to our final path
-        os.rename(video_path, output_path)
+        # Rename or trim the playwright generated video to our final path
+        if skip_start > 0:
+            import subprocess
+            subprocess.run(["ffmpeg", "-y", "-ss", str(skip_start), "-i", video_path, "-c", "copy", output_path], check=True, capture_output=True)
+            os.remove(video_path)
+        else:
+            os.rename(video_path, output_path)
         return {"status": "completed", "output_url": output_path}
 
 async def take_screenshot(payload):
