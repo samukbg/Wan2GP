@@ -507,8 +507,10 @@ async def record_website(payload):
     duration = payload.get("duration", 5)
     width = payload.get("width", 720)
     height = payload.get("height", 1280)
-    wait_for_network_idle = payload.get("wait_for_network_idle", False)
+    wait_time = payload.get("wait_time", 5)
+    wait_for_network_idle = payload.get("wait_for_network_idle", True)
     skip_start = payload.get("skip_start", 0)
+    do_scroll = payload.get("scroll", False)
     
     output_filename = f"record_{uuid.uuid4()}.mp4"
     output_path = os.path.abspath(os.path.join("outputs", output_filename))
@@ -529,13 +531,35 @@ async def record_website(payload):
                 await asyncio.sleep(5)
             except Exception as e:
                 print(f"wait_for_load_state exception: {e}")
-        await asyncio.sleep(2) # Wait for initial render
+        await asyncio.sleep(min(wait_time, 10))
         
-        # Simple linear scroll logic
-        start_time = time.time()
-        while time.time() - start_time < duration:
-            await page.mouse.wheel(0, 100)
-            await asyncio.sleep(0.1)
+        # --- AUTO-SCROLL DURING RECORDING ---
+        if do_scroll:
+            # Get total scrollable height
+            total_height = await page.evaluate("document.body.scrollHeight")
+            viewport_height = height
+            scroll_distance = max(0, total_height - viewport_height)
+            
+            # Scroll smoothly over the recording duration
+            # Use small incremental steps every ~100ms
+            record_duration = duration + skip_start
+            steps = int(record_duration * 10)  # 10 steps per second
+            step_delay = record_duration / steps if steps > 0 else 0.1
+            scroll_per_step = scroll_distance / steps if steps > 0 else 0
+            
+            async def auto_scroll():
+                for i in range(steps):
+                    y = int(i * scroll_per_step)
+                    await page.evaluate(f"window.scrollTo({{top: {y}, behavior: 'instant'}})")
+                    await asyncio.sleep(step_delay)
+            
+            # Start scrolling concurrently with recording
+            scroll_task = asyncio.create_task(auto_scroll())
+        
+        if do_scroll:
+            await scroll_task  # wait for scroll to finish
+        else:
+            await asyncio.sleep(duration + skip_start)
             
         video_path = await page.video.path()
         await context.close()
