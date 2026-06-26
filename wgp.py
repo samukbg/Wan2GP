@@ -6769,7 +6769,7 @@ def generate_media(
     model_filename = get_model_filename(base_model_type)  
 
     video_length = (video_length -1) // latent_size * latent_size + 1
-    if sliding_window_size !=0:
+    if sliding_window_size is not None and sliding_window_size != 0:
         sliding_window_size = (sliding_window_size -1) // latent_size * latent_size + 1
     if sliding_window_overlap !=0:
         sliding_window_defaults = model_def.get("sliding_window_defaults", {})
