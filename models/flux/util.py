@@ -937,59 +937,26 @@ def print_load_warning(missing: list[str], unexpected: list[str]) -> None:
 
 def preprocess_flux2_state_dict(state_dict: dict, params: FluxParams) -> dict:
     """
-    Remap Flux2 checkpoint keys to the shared Flux1-style module layout.
-    - Duplicate shared modulation weights to each single/double block.
-    - Drop unused guidance embeddings that are identity in Flux2.
+    Remap Flux2 checkpoint keys to match the native PyTorch Flux class which 
+    instantiates shared modulations.
     """
     sd = dict(state_dict)
-    def pop_mod(prefix: str):
-        w = sd.pop(f"{prefix}.lin.weight", None)
-        b = sd.pop(f"{prefix}.lin.bias", None)
-        if w is None:
-            w = sd.pop(f"{prefix}.linear.weight", None)
-            b = sd.pop(f"{prefix}.linear.bias", None) if b is None else b
-        return w, b
+    
+    # Rename .linear to .lin for shared modulations if they exist
+    for prefix in ["double_stream_modulation_img", "double_stream_modulation_txt", "single_stream_modulation"]:
+        if f"{prefix}.linear.weight" in sd:
+            sd[f"{prefix}.lin.weight"] = sd.pop(f"{prefix}.linear.weight")
+        if f"{prefix}.linear.bias" in sd:
+            sd[f"{prefix}.lin.bias"] = sd.pop(f"{prefix}.linear.bias")
+            
+    # Also drop unused guidance embeddings if params.guidance_embed is False
+    # (so we don't get unexpected key errors)
+    if not getattr(params, "guidance_embed", False):
+        sd.pop("guidance_in.in_layer.weight", None)
+        sd.pop("guidance_in.in_layer.bias", None)
+        sd.pop("guidance_in.out_layer.weight", None)
+        sd.pop("guidance_in.out_layer.bias", None)
 
-    img_mod_w, img_mod_b = pop_mod("double_stream_modulation_img")
-    txt_mod_w, txt_mod_b = pop_mod("double_stream_modulation_txt")
-    single_mod_w, single_mod_b = pop_mod("single_stream_modulation")
-
-    if img_mod_w is not None:
-        for i in range(params.depth):
-            sd[f"double_blocks.{i}.img_mod.lin.weight"] = img_mod_w
-            if img_mod_b is not None:
-                sd[f"double_blocks.{i}.img_mod.lin.bias"] = img_mod_b
-    if txt_mod_w is not None:
-        for i in range(params.depth):
-            sd[f"double_blocks.{i}.txt_mod.lin.weight"] = txt_mod_w
-            if txt_mod_b is not None:
-                sd[f"double_blocks.{i}.txt_mod.lin.bias"] = txt_mod_b
-    if single_mod_w is not None:
-        for i in range(params.depth_single_blocks):
-            sd[f"single_blocks.{i}.modulation.lin.weight"] = single_mod_w
-            if single_mod_b is not None:
-                sd[f"single_blocks.{i}.modulation.lin.bias"] = single_mod_b
-
-    # Remove unused inputs from Flux2 that are identity for us.
-    for unused in (
-        "double_stream_modulation_img.lin.weight",
-        "double_stream_modulation_img.lin.bias",
-        "double_stream_modulation_txt.lin.weight",
-        "double_stream_modulation_txt.lin.bias",
-        "single_stream_modulation.lin.weight",
-        "single_stream_modulation.lin.bias",
-        "double_stream_modulation_img.linear.weight",
-        "double_stream_modulation_img.linear.bias",
-        "double_stream_modulation_txt.linear.weight",
-        "double_stream_modulation_txt.linear.bias",
-        "single_stream_modulation.linear.weight",
-        "single_stream_modulation.linear.bias",
-        "guidance_in.in_layer.weight",
-        "guidance_in.in_layer.bias",
-        "guidance_in.out_layer.weight",
-        "guidance_in.out_layer.bias",
-    ):
-        sd.pop(unused, None)
     return sd
 
 
