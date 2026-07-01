@@ -18,7 +18,7 @@ from .modules.autoencoder_flux2 import AutoencoderKLFlux2, AutoEncoderParamsFlux
 from shared.qtypes import nunchaku_int4 as _nunchaku_int4
 from shared.utils.text_encoder_cache import TextEncoderCache
 
-from .util import load_ae, load_clip, load_flow_model, load_t5, preprocess_flux_state_dict, preprocess_flux2_state_dict
+from .util import load_ae, load_clip, load_flow_model, load_t5, preprocess_flux_state_dict, preprocess_flux2_state_dict, configs
 from .flux2_adapter import (
     scatter_ids ,
     batched_prc_img, 
@@ -101,11 +101,15 @@ class model_factory:
         source = model_def.get("source", None)
         self.clip = self.t5 = self.vision_encoder = self.mistal = None
         if self.is_flux2:
+            config_params = configs[self.name].params
+            def my_preprocess_sd(sd, *args, **kwargs):
+                return preprocess_flux2_state_dict(sd, config_params)
+
             self.model = load_flow_model(
                 self.name,
                 model_filename if source is None else source,
                 torch_device,
-                preprocess_sd=preprocess_flux2_state_dict if self.is_flux2 else preprocess_flux_state_dict,
+                preprocess_sd=my_preprocess_sd,
             )
             text_encoder_type = model_def.get("text_encoder_type", "mistral3")
             if text_encoder_type == "qwen3":
