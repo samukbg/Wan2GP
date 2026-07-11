@@ -116,6 +116,7 @@ class family_handler():
                 }
             extra_model_def["inpaint_color"] = "FF0000"
             extra_model_def["video_guide_outpainting"] = [1,2]
+            extra_model_def["outpainting_quantize_margins"]= 16
 
         if flux2:
             if flux2_klein:
@@ -263,7 +264,7 @@ class family_handler():
 
     @staticmethod
     def query_family_infos():
-        return {"flux":(100, "Flux 1"), "flux2":(101, "Flux 2")}
+        return {"flux":(1100, "Flux 1"), "flux2":(1101, "Flux 2")}
 
     @staticmethod
     def register_lora_cli_args(parser, lora_root):

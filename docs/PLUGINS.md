@@ -64,6 +64,8 @@ Reference plugins:
 
 Specialized plugin APIs:
 *   Spatial upsamplers are documented in [Spatial Upsampler Plugin API](SPATIAL_UPSAMPLERS.md). Use this guide for post-processing upsamplers, VAE upsampler capability declarations, plugin-discovered `spatial_upsampler_handlers`, and extension offload object registration.
+*   Temporal upsamplers are documented in [Temporal Upsampler Plugin API](TEMPORAL_UPSAMPLERS.md). Use this guide for frame interpolation handlers, plugin-discovered `temporal_upsampler_handlers`, and temporal upsampler config sections.
+*   Audio processors are documented in [Audio Processor Plugin API](AUDIO_PROCESSORS.md). Use this guide for soundtrack, voice replacement, standalone audio edit handlers, plugin-discovered `audio_processors`, and audio processor config sections.
 
 A complete plugin folder typically looks like this:
 
@@ -169,6 +171,18 @@ If you used `add_tab`, these methods will be called automatically when your tab 
 
 #### `on_model_change(self, state, model_type)`
 This optional callback runs when the main model selection changes in the Gradio UI. `state["model_type"]` has already been updated, so plugins can use it to refresh per-model caches, reset plugin state, or synchronize custom UI logic.
+
+#### Switching the Main Model
+Plugins can reuse WanGP's normal model-switch flow by requesting the hidden target component and the public helper:
+
+```python
+def setup_ui(self):
+    self.request_component("model_choice_target")
+    self.request_component("main_tabs")
+    self.request_global("switch_to_model")
+```
+
+`switch_to_model(model_type, open_media_tab=False)` returns two values: the model switch target update and a main-tab update. Wire them to `[self.model_choice_target, self.main_tabs]`. Keep `open_media_tab=False` to stay in the plugin, or pass `True` to open the Media Generator tab.
 
 #### `set_global(self, variable_name, new_value)`
 Allows your plugin to safely modify a global variable in the main `wgp.py` application.
