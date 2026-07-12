@@ -29,9 +29,6 @@
     "save_queue_if_crash": 1,
     "queue_color_scheme": "pastel",
     "model_hierarchy_type": 1,
-    "mmaudio_mode": 1,
-    "mmaudio_persistence": 1,
-    "rife_version": "v4",
     "prompt_enhancer_temperature": 0.6,
     "prompt_enhancer_top_p": 0.9,
     "prompt_enhancer_randomize_seed": true,
@@ -48,7 +45,8 @@
         "wan": "infinitetalk",
         "ltxv": "ltxv_13B",
         "flux2": "flux2_klein_9b",
-        "ideogram4": "ideogram4"
+        "ideogram4": "ideogram4",
+        "krea2": "krea2_turbo"
     },
     "last_model_per_type": {
         "ltx2_19B": "ltx2_19B",
@@ -63,9 +61,11 @@
         "flux2_klein_9b": "flux2_klein_9b",
         "pi_flux2": "pi_flux2",
         "ideogram4": "ideogram4",
-        "joyai_echo": "joyai_echo"
+        "joyai_echo": "joyai_echo",
+        "krea2_raw": "krea2_raw",
+        "krea2_turbo": "krea2_turbo"
     },
-    "last_model_type": "ltx2_22B_distilled_1_1",
+    "last_model_type": "flux2_klein_9b",
     "last_resolution_choice": "720x1280",
     "last_resolution_per_group": {
         "720p": "720x1280",
@@ -94,9 +94,6 @@
     ],
     "motion_designer_bundled_migrated": 1,
     "multi_prompts_gen_type": "PG",
-    "mmaudio_enabled": 1,
-    "seedvc_mode": 2,
-    "seedvc_persistence": 1,
     "enhancer_enabled": 3,
     "spatial_upsamplers": {
         "flashvsr": {
@@ -114,7 +111,30 @@
             "parallel_tile_processing": "auto"
         }
     },
-    "extensions_defaults_version": "1.15",
+    "extensions_defaults_version": "1.17",
     "installed_remote_plugins": [],
-    "hdr_video_crf": 8
+    "hdr_video_crf": 8,
+    "audio_processors": {
+        "mmaudio": {
+            "mode": 1,
+            "persistence": 1
+        },
+        "seedvc": {
+            "mode": 2,
+            "persistence": 1
+        },
+        "prismaudio": {
+            "mode": 1,
+            "persistence": 1,
+            "steps": 24,
+            "cfg_scale": 5.0
+        }
+    },
+    "temporal_upsamplers": {
+        "rife": {
+            "version": "v4"
+        }
+    },
+    "keep_resolution_on_model_switch": true,
+    "model_output_filter": "all"
 }
