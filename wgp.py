@@ -13351,7 +13351,11 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
     params['override_profile'] = override_profile
     params['audio_input'] = audio_input
     params['masking_strength'] = masking_strength
-    params['sliding_window_size'] = sliding_window_size
+    if sliding_window_size is not None:
+        try:
+            params['sliding_window_size'] = int(str(sliding_window_size).strip())
+        except Exception:
+            pass
     params['model_type'] = model_type
     params['prompt'] = prompt
     if num_inference_steps is not None:
