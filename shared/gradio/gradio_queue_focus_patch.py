@@ -557,6 +557,28 @@ def install() -> bool:
             app = original_create_app(*args, **kwargs)
             from fastapi import HTTPException
             import functools
+            import os
+
+            # Enforce TrustedHostMiddleware on Fly.io or via custom env config
+            allowed_hosts_str = os.getenv("WANGP_ALLOWED_HOSTS", "").strip()
+            if allowed_hosts_str:
+                allowed_hosts = [h.strip() for h in allowed_hosts_str.split(",") if h.strip()]
+            elif os.getenv("FLY_APP_NAME"):
+                allowed_hosts = [
+                    "localhost",
+                    "127.0.0.1",
+                    "[::1]",
+                    "*.fly.dev",
+                    "*.fly.io",
+                    "samuelbezerra.fr",
+                    "*.samuelbezerra.fr",
+                ]
+            else:
+                allowed_hosts = None
+
+            if allowed_hosts:
+                from fastapi.middleware.trustedhost import TrustedHostMiddleware
+                app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
             for route in app.routes:
                 if route.path == "/":
