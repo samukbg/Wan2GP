@@ -400,7 +400,9 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
         
         print(f"[Hyperframes] Running: {' '.join(cmd)}")
         use_shell = (os.name == "nt")
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=use_shell)
+        custom_env = os.environ.copy()
+        custom_env["HF_VIDEO_COVERAGE_THRESHOLD"] = "0"
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=use_shell, env=custom_env)
         
         for line in process.stdout:
             print(f"[Hyperframes] {line.strip()}")
