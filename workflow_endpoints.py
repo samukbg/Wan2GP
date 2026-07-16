@@ -9,6 +9,8 @@ import shutil
 import time
 import platform
 import sys
+import hashlib
+import re
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
@@ -255,6 +257,42 @@ def get_render_status(execution_id: str):
         return JSONResponse({"error": "Execution ID not found"}, status_code=404)
     return status
 
+def _preprocess_hyperframes_html(html: str, dest_dir: str) -> str:
+    """Scan HTML for external media URLs, download them locally, and replace the URLs with local paths."""
+    if not html:
+        return html
+    urls = re.findall(r'https?://[^\s"\'<>]+?(?:\.mp4|\.webm|\.mp3|\.wav)[^\s"\'<>]*', html)
+    unique_urls = list(set(urls))
+    
+    for url in unique_urls:
+        ext = ".mp4"
+        if ".webm" in url: ext = ".webm"
+        elif ".mp3" in url: ext = ".mp3"
+        elif ".wav" in url: ext = ".wav"
+        
+        filename = f"local_media_{hashlib.md5(url.encode()).hexdigest()[:8]}{ext}"
+        dest_path = os.path.join(dest_dir, filename)
+        
+        print(f"[Hyperframes] Pre-downloading media: {url} -> {filename}")
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0",
+                "Referer": "https://viralhog.com/" if "viralhog.com" in url else url
+            }
+            resp = requests.get(url, headers=headers, stream=True, timeout=30)
+            if resp.status_code == 200:
+                with open(dest_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                html = html.replace(url, f"./{filename}")
+                print(f"[Hyperframes] Pre-download successful for {url}")
+            else:
+                print(f"[Hyperframes] Pre-download failed for {url} with status {resp.status_code}")
+        except Exception as e:
+            print(f"[Hyperframes] Pre-download error for {url}: {e}")
+            
+    return html
+
 def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id: str):
     executions[execution_id] = {"status": "processing", "progress": 0}
     
@@ -277,9 +315,26 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
         elif html_content:
             with open(index_path, 'w', encoding='utf-8') as f:
                 f.write(html_content)
+        elif "index.html" in files:
+            content = files.pop("index.html")
+            if isinstance(content, str) and (content.startswith("http://") or content.startswith("https://")):
+                download_file(content, index_path)
+            else:
+                mode = 'w' if isinstance(content, str) else 'wb'
+                encoding = 'utf-8' if isinstance(content, str) else None
+                with open(index_path, mode, encoding=encoding) as f:
+                    f.write(content)
         else:
-            if "index.html" not in files:
-                raise ValueError("Either 'html', 'html_url', or 'index.html' in 'files' must be provided")
+            raise ValueError("Either 'html', 'html_url', or 'index.html' in 'files' must be provided")
+            
+        try:
+            with open(index_path, 'r', encoding='utf-8') as f:
+                current_html = f.read()
+            current_html = _preprocess_hyperframes_html(current_html, temp_dir)
+            with open(index_path, 'w', encoding='utf-8') as f:
+                f.write(current_html)
+        except Exception as e:
+            print(f"[Hyperframes] Warning: Could not preprocess index.html: {e}")
             
         duration = data.get("duration")
         if duration is not None:
