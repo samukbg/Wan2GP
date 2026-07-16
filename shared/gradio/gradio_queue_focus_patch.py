@@ -550,6 +550,35 @@ def install() -> bool:
         return False
     import gradio.routes as gradio_routes
 
+    # Validate page query parameters to prevent KeyError / 500 crashes
+    original_create_app = gradio_routes.App.create_app
+    if not getattr(original_create_app, "_wangp_xss_page_patch_installed", False):
+        def patched_create_app(*args, **kwargs):
+            app = original_create_app(*args, **kwargs)
+            from fastapi import HTTPException
+            import functools
+
+            for route in app.routes:
+                if route.path == "/":
+                    orig = route.endpoint
+                    @functools.wraps(orig)
+                    def wrapped(*args, **kwargs):
+                        page = kwargs.get("page", "")
+                        blocks = app.get_blocks()
+                        config = getattr(blocks, "config", None)
+                        if config and isinstance(config, dict) and "page" in config:
+                            pages = config["page"]
+                            if page and (not isinstance(pages, dict) or page not in pages):
+                                raise HTTPException(status_code=404, detail="Page not found")
+                        return orig(*args, **kwargs)
+                    route.endpoint = wrapped
+                    if hasattr(route, "dependant") and route.dependant:
+                        route.dependant.call = wrapped
+            return app
+
+        patched_create_app._wangp_xss_page_patch_installed = True
+        gradio_routes.App.create_app = patched_create_app
+
     templates = getattr(gradio_routes, "templates", None)
     loader = getattr(getattr(templates, "env", None), "loader", None)
     if loader is None:
