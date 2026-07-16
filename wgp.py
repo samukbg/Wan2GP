@@ -7614,7 +7614,8 @@ def generate_media(
                 remove_temp_filenames(temp_filenames_list)
                 gen_state = plugin_data = None
                 clear_gen_cache()
-                offloadobj.unload_all()
+                if offloadobj is not None:
+                    offloadobj.unload_all()
                 trans.cache = None 
                 if trans2 is not None: 
                     trans2.cache = None 
