@@ -261,35 +261,48 @@ def _preprocess_hyperframes_html(html: str, dest_dir: str) -> str:
     """Scan HTML for external media URLs, download them locally, and replace the URLs with local paths."""
     if not html:
         return html
-    urls = re.findall(r'https?://[^\s"\'<>]+?(?:\.mp4|\.webm|\.mp3|\.wav)[^\s"\'<>]*', html)
+    # Support URLs with escaped slashes like https:\/\/...
+    urls = re.findall(r'https?(?::|\\:)(?:/|\\/){2}[^\s"\'<>]+?(?:\.mp4|\.webm|\.mp3|\.wav)[^\s"\'<>]*', html)
     unique_urls = list(set(urls))
     
-    for url in unique_urls:
+    for raw_url in unique_urls:
+        clean_url = raw_url.replace('\\/', '/').replace('\\:', ':')
         ext = ".mp4"
-        if ".webm" in url: ext = ".webm"
-        elif ".mp3" in url: ext = ".mp3"
-        elif ".wav" in url: ext = ".wav"
+        if ".webm" in clean_url: ext = ".webm"
+        elif ".mp3" in clean_url: ext = ".mp3"
+        elif ".wav" in clean_url: ext = ".wav"
         
-        filename = f"local_media_{hashlib.md5(url.encode()).hexdigest()[:8]}{ext}"
+        filename = f"local_media_{hashlib.md5(clean_url.encode()).hexdigest()[:8]}{ext}"
         dest_path = os.path.join(dest_dir, filename)
         
-        print(f"[Hyperframes] Pre-downloading media: {url} -> {filename}")
+        print(f"[Hyperframes] Pre-downloading media: {clean_url} -> {filename}")
         try:
             headers = {
                 "User-Agent": "Mozilla/5.0",
-                "Referer": "https://viralhog.com/" if "viralhog.com" in url else url
+                "Referer": "https://viralhog.com/" if "viralhog.com" in clean_url else clean_url
             }
-            resp = requests.get(url, headers=headers, stream=True, timeout=30)
+            resp = requests.get(clean_url, headers=headers, stream=True, timeout=60)
             if resp.status_code == 200:
+                content_type = resp.headers.get("Content-Type", "")
+                if "text/html" in content_type:
+                    print(f"[Hyperframes] Pre-download failed for {clean_url}: returned HTML (Bot Protection). Skipping replacement.")
+                    continue
+                
                 with open(dest_path, "wb") as f:
                     for chunk in resp.iter_content(chunk_size=8192):
                         f.write(chunk)
-                html = html.replace(url, f"./{filename}")
-                print(f"[Hyperframes] Pre-download successful for {url}")
+                
+                if os.path.getsize(dest_path) == 0:
+                    print(f"[Hyperframes] Pre-download failed: 0 bytes downloaded for {clean_url}. Skipping replacement.")
+                    os.remove(dest_path)
+                    continue
+
+                html = html.replace(raw_url, f"./{filename}")
+                print(f"[Hyperframes] Pre-download successful for {clean_url}")
             else:
-                print(f"[Hyperframes] Pre-download failed for {url} with status {resp.status_code}")
+                print(f"[Hyperframes] Pre-download failed for {clean_url} with status {resp.status_code}")
         except Exception as e:
-            print(f"[Hyperframes] Pre-download error for {url}: {e}")
+            print(f"[Hyperframes] Pre-download error for {clean_url}: {e}")
             
     return html
 
@@ -354,9 +367,9 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
         
         tsx_content = data.get("tsx")
         if tsx_content:
+            tsx_content = _preprocess_hyperframes_html(tsx_content, temp_dir)
             with open(os.path.join(temp_dir, "Component.tsx"), "w", encoding="utf-8") as f:
                 f.write(tsx_content)
-
 
         for filename, content in files.items():
             dest_path = os.path.join(temp_dir, filename)
@@ -365,6 +378,8 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
             if isinstance(content, str) and (content.startswith("http://") or content.startswith("https://")):
                 download_file(content, dest_path)
             else:
+                if isinstance(content, str):
+                    content = _preprocess_hyperframes_html(content, temp_dir)
                 mode = 'w' if isinstance(content, str) else 'wb'
                 encoding = 'utf-8' if isinstance(content, str) else None
                 with open(dest_path, mode, encoding=encoding) as f:
