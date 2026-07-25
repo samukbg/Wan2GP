@@ -756,6 +756,16 @@ def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: s
         if process.returncode != 0:
             raise RuntimeError(f"Local Remotion render failed with exit code {process.returncode}")
             
+        if not os.path.exists(output_path):
+            print("[Remotion] Output file not found! Remotion may have exited early after a first-time browser download. Retrying render...")
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', shell=use_shell, cwd=project_root)
+            for line in process.stdout:
+                print(f"[Remotion Retry] {line.strip()}")
+            process.wait()
+            
+            if process.returncode != 0 or not os.path.exists(output_path):
+                raise FileNotFoundError(f"Remotion failed to create output file even after retry: {output_path}")
+            
         executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
         print(f"Remotion render complete: {output_path}")
             
@@ -843,6 +853,15 @@ def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: st
             
         if process.returncode != 0:
             raise RuntimeError(f"Local Remotion still failed with exit code {process.returncode}")
+            
+        if not os.path.exists(output_path):
+            print("[Remotion] Output file not found! Remotion may have exited early after a first-time browser download. Retrying still...")
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', shell=use_shell, cwd=project_root)
+            print(f"[Remotion Retry] {process.stdout.read()}")
+            process.wait()
+            
+            if process.returncode != 0 or not os.path.exists(output_path):
+                raise FileNotFoundError(f"Remotion failed to create output file even after retry: {output_path}")
             
         executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
         print(f"Remotion still complete: {output_path}")
