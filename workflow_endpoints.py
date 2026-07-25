@@ -748,11 +748,6 @@ def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: s
             
         process.wait()
         
-        try:
-            os.remove(props_path)
-        except:
-            pass
-            
         if process.returncode != 0:
             raise RuntimeError(f"Local Remotion render failed with exit code {process.returncode}")
             
@@ -765,6 +760,11 @@ def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: s
             
             if process.returncode != 0 or not os.path.exists(output_path):
                 raise FileNotFoundError(f"Remotion failed to create output file even after retry: {output_path}")
+                
+        try:
+            os.remove(props_path)
+        except:
+            pass
             
         executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
         print(f"Remotion render complete: {output_path}")
@@ -846,11 +846,6 @@ def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: st
         
         process.wait()
             
-        try:
-            os.remove(props_path)
-        except:
-            pass
-            
         if process.returncode != 0:
             raise RuntimeError(f"Local Remotion still failed with exit code {process.returncode}")
             
@@ -862,6 +857,11 @@ def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: st
             
             if process.returncode != 0 or not os.path.exists(output_path):
                 raise FileNotFoundError(f"Remotion failed to create output file even after retry: {output_path}")
+                
+        try:
+            os.remove(props_path)
+        except:
+            pass
             
         executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
         print(f"Remotion still complete: {output_path}")
