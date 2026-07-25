@@ -16,6 +16,7 @@ from fastapi import APIRouter, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from shared.ffmpeg_setup import download_ffmpeg
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+from remotion_lambda import RenderMediaParams, RenderStillParams, Privacy, ValidStillImageFormats, RemotionClient
 
 router = APIRouter()
 
@@ -671,6 +672,103 @@ async def take_screenshot(payload):
         await page.screenshot(path=output_path, type="jpeg", quality=90)
         await browser.close()
         return output_path
+
+def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: str):
+    executions[execution_id] = {"status": "processing", "progress": 0}
+    try:
+        region = data.get("region") or os.getenv("REMOTION_APP_REGION")
+        function_name = data.get("function_name") or os.getenv("REMOTION_APP_FUNCTION_NAME")
+        serve_url = data.get("serve_url") or os.getenv("REMOTION_APP_SERVE_URL")
+        composition = data.get("composition", "my-composition")
+        input_props = data.get("input_props", {})
+        
+        client = RemotionClient(region=region, serve_url=serve_url, function_name=function_name)
+        
+        render_params = RenderMediaParams(
+            composition=composition,
+            privacy=Privacy.PUBLIC,
+            input_props=input_props
+        )
+        
+        render_response = client.render_media_on_lambda(render_params)
+        if not render_response:
+            raise RuntimeError("Failed to start remotion render")
+            
+        while True:
+            progress = client.get_render_progress(render_id=render_response.render_id, bucket_name=render_response.bucket_name)
+            if not progress:
+                time.sleep(2)
+                continue
+            
+            if progress.fatalErrorEncountered:
+                raise RuntimeError(f"Remotion fatal error: {progress.errors}")
+                
+            if progress.done:
+                download_file(progress.outputFile, output_path)
+                executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
+                print(f"Remotion render complete: {output_path}")
+                break
+                
+            executions[execution_id]["progress"] = int(progress.overallProgress * 100)
+            time.sleep(2)
+            
+    except Exception as e:
+        print(f"Remotion render failed: {e}")
+        executions[execution_id] = {"status": "failed", "error": str(e)}
+
+def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: str):
+    executions[execution_id] = {"status": "processing", "progress": 0}
+    try:
+        region = data.get("region") or os.getenv("REMOTION_APP_REGION")
+        function_name = data.get("function_name") or os.getenv("REMOTION_APP_FUNCTION_NAME")
+        serve_url = data.get("serve_url") or os.getenv("REMOTION_APP_SERVE_URL")
+        composition = data.get("composition", "my-composition")
+        input_props = data.get("input_props", {})
+        
+        client = RemotionClient(region=region, serve_url=serve_url, function_name=function_name)
+        
+        render_params = RenderStillParams(
+            composition=composition,
+            privacy=Privacy.PUBLIC,
+            image_format=ValidStillImageFormats.JPEG,
+            input_props=input_props
+        )
+        
+        render_response = client.render_still_on_lambda(render_params)
+        if not render_response or not render_response.url:
+            raise RuntimeError("Failed to start remotion still render")
+            
+        download_file(render_response.url, output_path)
+        executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
+        print(f"Remotion still complete: {output_path}")
+            
+    except Exception as e:
+        print(f"Remotion still failed: {e}")
+        executions[execution_id] = {"status": "failed", "error": str(e)}
+
+@router.post("/remotion/render")
+async def remotion_render(request: Request, background_tasks: BackgroundTasks):
+    try: data = await request.json()
+    except: return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    
+    execution_id = data.get("execution_id", str(uuid.uuid4()))
+    output_path = os.path.join("outputs", f"remotion_{execution_id}.mp4")
+    os.makedirs("outputs", exist_ok=True)
+    
+    background_tasks.add_task(remotion_render_task, data, output_path, execution_id)
+    return {"status": "queued", "execution_id": execution_id, "output_url": f"/file={output_path}"}
+
+@router.post("/remotion/render_still")
+async def remotion_render_still(request: Request, background_tasks: BackgroundTasks):
+    try: data = await request.json()
+    except: return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    
+    execution_id = data.get("execution_id", str(uuid.uuid4()))
+    output_path = os.path.join("outputs", f"remotion_{execution_id}.jpg")
+    os.makedirs("outputs", exist_ok=True)
+    
+    background_tasks.add_task(remotion_still_task, data, output_path, execution_id)
+    return {"status": "queued", "execution_id": execution_id, "output_url": f"/file={output_path}"}
 
 def setup_workflow_endpoints(app):
     ensure_hyperframes_env()
