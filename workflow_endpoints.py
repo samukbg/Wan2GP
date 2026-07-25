@@ -16,7 +16,7 @@ from fastapi import APIRouter, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from shared.ffmpeg_setup import download_ffmpeg
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
-from remotion_lambda import RenderMediaParams, RenderStillParams, Privacy, ValidStillImageFormats, RemotionClient
+
 
 router = APIRouter()
 
@@ -676,49 +676,38 @@ async def take_screenshot(payload):
 def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: str):
     executions[execution_id] = {"status": "processing", "progress": 0}
     try:
-        region = data.get("region") or os.getenv("REMOTION_APP_REGION")
-        function_name = data.get("function_name") or os.getenv("REMOTION_APP_FUNCTION_NAME")
-        serve_url = data.get("serve_url") or os.getenv("REMOTION_APP_SERVE_URL")
-        
-        missing = []
-        if not region: missing.append("region")
-        if not function_name: missing.append("function_name")
-        if not serve_url: missing.append("serve_url")
-        if missing:
-            raise ValueError(f"Missing required Remotion parameters: {', '.join(missing)}. Provide them in the JSON payload or as environment variables (REMOTION_APP_REGION, etc).")
-            
+        serve_url = data.get("serve_url")
         composition = data.get("composition", "my-composition")
         input_props = data.get("input_props", {})
         
-        client = RemotionClient(region=region, serve_url=serve_url, function_name=function_name)
-        
-        render_params = RenderMediaParams(
-            composition=composition,
-            privacy=Privacy.PUBLIC,
-            input_props=input_props
-        )
-        
-        render_response = client.render_media_on_lambda(render_params)
-        if not render_response:
-            raise RuntimeError("Failed to start remotion render")
+        if not serve_url:
+            raise ValueError("Missing required Remotion parameter: 'serve_url' (path to your Remotion app).")
             
-        while True:
-            progress = client.get_render_progress(render_id=render_response.render_id, bucket_name=render_response.bucket_name)
-            if not progress:
-                time.sleep(2)
-                continue
+        npx_executable = get_npx_command()
+        cmd = [
+            npx_executable, "remotion", "render",
+            serve_url, composition, os.path.abspath(output_path),
+            "--props", json.dumps(input_props)
+        ]
+        
+        executions[execution_id]["progress"] = 10
+        print(f"[Remotion] Running locally: {' '.join(cmd)}")
+        use_shell = (os.name == "nt")
+        
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=use_shell)
+        
+        # very simple progress simulation
+        for line in process.stdout:
+            print(f"[Remotion] {line.strip()}")
+            executions[execution_id]["progress"] = min(90, executions[execution_id]["progress"] + 1)
             
-            if progress.fatalErrorEncountered:
-                raise RuntimeError(f"Remotion fatal error: {progress.errors}")
-                
-            if progress.done:
-                download_file(progress.outputFile, output_path)
-                executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
-                print(f"Remotion render complete: {output_path}")
-                break
-                
-            executions[execution_id]["progress"] = int(progress.overallProgress * 100)
-            time.sleep(2)
+        process.wait()
+        
+        if process.returncode != 0:
+            raise RuntimeError(f"Local Remotion render failed with exit code {process.returncode}")
+            
+        executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
+        print(f"Remotion render complete: {output_path}")
             
     except Exception as e:
         print(f"Remotion render failed: {e}")
@@ -727,34 +716,34 @@ def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: s
 def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: str):
     executions[execution_id] = {"status": "processing", "progress": 0}
     try:
-        region = data.get("region") or os.getenv("REMOTION_APP_REGION")
-        function_name = data.get("function_name") or os.getenv("REMOTION_APP_FUNCTION_NAME")
-        serve_url = data.get("serve_url") or os.getenv("REMOTION_APP_SERVE_URL")
-        
-        missing = []
-        if not region: missing.append("region")
-        if not function_name: missing.append("function_name")
-        if not serve_url: missing.append("serve_url")
-        if missing:
-            raise ValueError(f"Missing required Remotion parameters: {', '.join(missing)}. Provide them in the JSON payload or as environment variables (REMOTION_APP_REGION, etc).")
-            
+        serve_url = data.get("serve_url")
         composition = data.get("composition", "my-composition")
         input_props = data.get("input_props", {})
+        frame = data.get("frame", 0)
         
-        client = RemotionClient(region=region, serve_url=serve_url, function_name=function_name)
-        
-        render_params = RenderStillParams(
-            composition=composition,
-            privacy=Privacy.PUBLIC,
-            image_format=ValidStillImageFormats.JPEG,
-            input_props=input_props
-        )
-        
-        render_response = client.render_still_on_lambda(render_params)
-        if not render_response or not render_response.url:
-            raise RuntimeError("Failed to start remotion still render")
+        if not serve_url:
+            raise ValueError("Missing required Remotion parameter: 'serve_url' (path to your Remotion app).")
             
-        download_file(render_response.url, output_path)
+        npx_executable = get_npx_command()
+        cmd = [
+            npx_executable, "remotion", "still",
+            serve_url, composition, os.path.abspath(output_path),
+            "--props", json.dumps(input_props),
+            "--frame", str(frame)
+        ]
+        
+        executions[execution_id]["progress"] = 10
+        print(f"[Remotion] Running locally: {' '.join(cmd)}")
+        use_shell = (os.name == "nt")
+        
+        process = subprocess.run(cmd, capture_output=True, text=True, shell=use_shell)
+        print(f"[Remotion] {process.stdout}")
+        if process.stderr:
+            print(f"[Remotion ERR] {process.stderr}")
+            
+        if process.returncode != 0:
+            raise RuntimeError(f"Local Remotion still failed with exit code {process.returncode}")
+            
         executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
         print(f"Remotion still complete: {output_path}")
             
