@@ -684,10 +684,16 @@ def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: s
             raise ValueError("Missing required Remotion parameter: 'serve_url' (path to your Remotion app).")
             
         npx_executable = get_npx_command()
+        
+        # Write props to a temporary file to avoid complex Windows shell escaping issues
+        fd, props_path = tempfile.mkstemp(suffix=".json", prefix="remotion_props_")
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(input_props, f)
+            
         cmd = [
             npx_executable, "-y", "-p", "@remotion/cli", "remotion", "render",
             serve_url, composition, os.path.abspath(output_path),
-            "--props", json.dumps(input_props)
+            "--props", props_path
         ]
         
         executions[execution_id]["progress"] = 10
@@ -703,6 +709,11 @@ def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: s
             
         process.wait()
         
+        try:
+            os.remove(props_path)
+        except:
+            pass
+            
         if process.returncode != 0:
             raise RuntimeError(f"Local Remotion render failed with exit code {process.returncode}")
             
@@ -725,10 +736,16 @@ def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: st
             raise ValueError("Missing required Remotion parameter: 'serve_url' (path to your Remotion app).")
             
         npx_executable = get_npx_command()
+        
+        # Write props to a temporary file to avoid complex Windows shell escaping issues
+        fd, props_path = tempfile.mkstemp(suffix=".json", prefix="remotion_props_")
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(input_props, f)
+            
         cmd = [
             npx_executable, "-y", "-p", "@remotion/cli", "remotion", "still",
             serve_url, composition, os.path.abspath(output_path),
-            "--props", json.dumps(input_props),
+            "--props", props_path,
             "--frame", str(frame)
         ]
         
@@ -740,6 +757,11 @@ def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: st
         print(f"[Remotion] {process.stdout}")
         if process.stderr:
             print(f"[Remotion ERR] {process.stderr}")
+            
+        try:
+            os.remove(props_path)
+        except:
+            pass
             
         if process.returncode != 0:
             raise RuntimeError(f"Local Remotion still failed with exit code {process.returncode}")
