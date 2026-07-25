@@ -739,7 +739,7 @@ def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: s
         print(f"[Remotion] Running locally in {project_root}: {' '.join(cmd)}")
         use_shell = (os.name == "nt")
         
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=use_shell, cwd=project_root)
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', shell=use_shell, cwd=project_root)
         
         # very simple progress simulation
         for line in process.stdout:
@@ -831,7 +831,7 @@ def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: st
         print(f"[Remotion] Running locally in {project_root}: {' '.join(cmd)}")
         use_shell = (os.name == "nt")
         
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=use_shell, cwd=project_root)
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', shell=use_shell, cwd=project_root)
         print(f"[Remotion] {process.stdout.read()}")
         
         process.wait()
