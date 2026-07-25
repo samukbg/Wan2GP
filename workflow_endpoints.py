@@ -677,6 +677,23 @@ def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: s
     executions[execution_id] = {"status": "processing", "progress": 0}
     try:
         serve_url = data.get("serve_url")
+        if serve_url and not serve_url.startswith(("http://", "https://")):
+            serve_url_clean = serve_url.replace("\\", "/")
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            if not os.path.exists(serve_url_clean):
+                parts = [p for p in serve_url_clean.split("/") if p]
+                mapped = False
+                for i in range(len(parts)):
+                    if os.path.isdir(os.path.join(base_dir, parts[i])):
+                        serve_url = os.path.join(base_dir, *parts[i:])
+                        mapped = True
+                        break
+                if not mapped and not os.path.isabs(serve_url_clean):
+                    serve_url = os.path.join(base_dir, serve_url_clean)
+            elif not os.path.isabs(serve_url_clean):
+                serve_url = os.path.join(base_dir, serve_url_clean)
+            serve_url = os.path.abspath(serve_url)
+            
         composition = data.get("composition", "my-composition")
         input_props = data.get("input_props", {})
         
@@ -728,6 +745,23 @@ def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: st
     executions[execution_id] = {"status": "processing", "progress": 0}
     try:
         serve_url = data.get("serve_url")
+        if serve_url and not serve_url.startswith(("http://", "https://")):
+            serve_url_clean = serve_url.replace("\\", "/")
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            if not os.path.exists(serve_url_clean):
+                parts = [p for p in serve_url_clean.split("/") if p]
+                mapped = False
+                for i in range(len(parts)):
+                    if os.path.isdir(os.path.join(base_dir, parts[i])):
+                        serve_url = os.path.join(base_dir, *parts[i:])
+                        mapped = True
+                        break
+                if not mapped and not os.path.isabs(serve_url_clean):
+                    serve_url = os.path.join(base_dir, serve_url_clean)
+            elif not os.path.isabs(serve_url_clean):
+                serve_url = os.path.join(base_dir, serve_url_clean)
+            serve_url = os.path.abspath(serve_url)
+            
         composition = data.get("composition", "my-composition")
         input_props = data.get("input_props", {})
         frame = data.get("frame", 0)
