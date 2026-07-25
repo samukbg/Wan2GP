@@ -679,6 +679,14 @@ def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: s
         region = data.get("region") or os.getenv("REMOTION_APP_REGION")
         function_name = data.get("function_name") or os.getenv("REMOTION_APP_FUNCTION_NAME")
         serve_url = data.get("serve_url") or os.getenv("REMOTION_APP_SERVE_URL")
+        
+        missing = []
+        if not region: missing.append("region")
+        if not function_name: missing.append("function_name")
+        if not serve_url: missing.append("serve_url")
+        if missing:
+            raise ValueError(f"Missing required Remotion parameters: {', '.join(missing)}. Provide them in the JSON payload or as environment variables (REMOTION_APP_REGION, etc).")
+            
         composition = data.get("composition", "my-composition")
         input_props = data.get("input_props", {})
         
@@ -722,6 +730,14 @@ def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: st
         region = data.get("region") or os.getenv("REMOTION_APP_REGION")
         function_name = data.get("function_name") or os.getenv("REMOTION_APP_FUNCTION_NAME")
         serve_url = data.get("serve_url") or os.getenv("REMOTION_APP_SERVE_URL")
+        
+        missing = []
+        if not region: missing.append("region")
+        if not function_name: missing.append("function_name")
+        if not serve_url: missing.append("serve_url")
+        if missing:
+            raise ValueError(f"Missing required Remotion parameters: {', '.join(missing)}. Provide them in the JSON payload or as environment variables (REMOTION_APP_REGION, etc).")
+            
         composition = data.get("composition", "my-composition")
         input_props = data.get("input_props", {})
         
