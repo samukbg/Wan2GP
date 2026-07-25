@@ -707,17 +707,29 @@ def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: s
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             json.dump(input_props, f)
             
+        if not os.path.exists(serve_url):
+            raise FileNotFoundError(f"Remotion entry point not found on server: {serve_url}")
+            
+        # Find project root for cwd (look for package.json or remotion.config.ts)
+        project_root = os.path.dirname(serve_url)
+        while project_root and project_root != os.path.dirname(project_root):
+            if os.path.exists(os.path.join(project_root, "package.json")) or os.path.exists(os.path.join(project_root, "remotion.config.ts")):
+                break
+            project_root = os.path.dirname(project_root)
+            
+        entry_point = os.path.relpath(serve_url, project_root)
+        
         cmd = [
             npx_executable, "-y", "-p", "@remotion/cli", "remotion", "render",
-            serve_url, composition, os.path.abspath(output_path),
+            entry_point, composition, os.path.abspath(output_path),
             "--props", props_path
         ]
         
         executions[execution_id]["progress"] = 10
-        print(f"[Remotion] Running locally: {' '.join(cmd)}")
+        print(f"[Remotion] Running locally in {project_root}: {' '.join(cmd)}")
         use_shell = (os.name == "nt")
         
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=use_shell)
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=use_shell, cwd=project_root)
         
         # very simple progress simulation
         for line in process.stdout:
@@ -776,21 +788,33 @@ def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: st
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             json.dump(input_props, f)
             
+        if not os.path.exists(serve_url):
+            raise FileNotFoundError(f"Remotion entry point not found on server: {serve_url}")
+            
+        # Find project root for cwd (look for package.json or remotion.config.ts)
+        project_root = os.path.dirname(serve_url)
+        while project_root and project_root != os.path.dirname(project_root):
+            if os.path.exists(os.path.join(project_root, "package.json")) or os.path.exists(os.path.join(project_root, "remotion.config.ts")):
+                break
+            project_root = os.path.dirname(project_root)
+            
+        entry_point = os.path.relpath(serve_url, project_root)
+        
         cmd = [
             npx_executable, "-y", "-p", "@remotion/cli", "remotion", "still",
-            serve_url, composition, os.path.abspath(output_path),
+            entry_point, composition, os.path.abspath(output_path),
             "--props", props_path,
             "--frame", str(frame)
         ]
         
         executions[execution_id]["progress"] = 10
-        print(f"[Remotion] Running locally: {' '.join(cmd)}")
+        print(f"[Remotion] Running locally in {project_root}: {' '.join(cmd)}")
         use_shell = (os.name == "nt")
         
-        process = subprocess.run(cmd, capture_output=True, text=True, shell=use_shell)
-        print(f"[Remotion] {process.stdout}")
-        if process.stderr:
-            print(f"[Remotion ERR] {process.stderr}")
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=use_shell, cwd=project_root)
+        print(f"[Remotion] {process.stdout.read()}")
+        
+        process.wait()
             
         try:
             os.remove(props_path)
