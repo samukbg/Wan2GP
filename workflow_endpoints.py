@@ -685,7 +685,7 @@ def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: s
             
         npx_executable = get_npx_command()
         cmd = [
-            npx_executable, "remotion", "render",
+            npx_executable, "-y", "@remotion/cli", "render",
             serve_url, composition, os.path.abspath(output_path),
             "--props", json.dumps(input_props)
         ]
@@ -726,7 +726,7 @@ def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: st
             
         npx_executable = get_npx_command()
         cmd = [
-            npx_executable, "remotion", "still",
+            npx_executable, "-y", "@remotion/cli", "still",
             serve_url, composition, os.path.abspath(output_path),
             "--props", json.dumps(input_props),
             "--frame", str(frame)
