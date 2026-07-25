@@ -680,6 +680,16 @@ def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: s
         if serve_url and not serve_url.startswith(("http://", "https://")):
             serve_url_clean = serve_url.replace("\\", "/")
             base_dir = os.path.dirname(os.path.abspath(__file__))
+            
+            # Map client's user path to current server's user path
+            lower_path = serve_url_clean.lower()
+            if lower_path.startswith("c:/users/"):
+                parts = serve_url_clean.split("/")
+                if len(parts) >= 4:
+                    current_user_profile = os.path.expanduser("~").replace("\\", "/")
+                    serve_url_clean = current_user_profile + "/" + "/".join(parts[3:])
+                    serve_url = serve_url_clean
+
             if not os.path.exists(serve_url_clean):
                 parts = [p for p in serve_url_clean.split("/") if p]
                 mapped = False
@@ -760,6 +770,16 @@ def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: st
         if serve_url and not serve_url.startswith(("http://", "https://")):
             serve_url_clean = serve_url.replace("\\", "/")
             base_dir = os.path.dirname(os.path.abspath(__file__))
+            
+            # Map client's user path to current server's user path
+            lower_path = serve_url_clean.lower()
+            if lower_path.startswith("c:/users/"):
+                parts = serve_url_clean.split("/")
+                if len(parts) >= 4:
+                    current_user_profile = os.path.expanduser("~").replace("\\", "/")
+                    serve_url_clean = current_user_profile + "/" + "/".join(parts[3:])
+                    serve_url = serve_url_clean
+
             if not os.path.exists(serve_url_clean):
                 parts = [p for p in serve_url_clean.split("/") if p]
                 mapped = False
