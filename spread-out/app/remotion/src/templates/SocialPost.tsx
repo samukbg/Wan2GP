@@ -19,35 +19,22 @@ export type SocialPostBadge = {
 export type SocialPostHighlight = {
   stat: string;
   label: string;
-  icon?: string; // SVG path or emoji
+  icon?: string;
 };
 
 export type SocialPostProps = {
-  /** The main headline / hook text */
   headline: string;
-  /** Supporting subheadline or body copy */
   subheadline?: string;
-  /** Call-to-action text */
   cta?: string;
-  /** URL of the Pexels background image */
   backgroundImageUrl: string;
-  /** Brand / product name */
   brandName?: string;
-  /** Layout variant */
   layout?: "split-bottom" | "top-title" | "center-punch" | "lower-third";
-  /** Theme accent color (hex). Defaults to Neo Lime. */
   accentColor?: string;
-  /** Secondary accent color */
   secondaryColor?: string;
-  /** Background overlay opacity 0..1 */
   overlayOpacity?: number;
-  /** Small badges/tags */
   badges?: SocialPostBadge[];
-  /** Up to 3 highlight stats */
   highlights?: SocialPostHighlight[];
-  /** Tagline below CTA */
   tagline?: string;
-  /** Font style */
   fontFamily?: string;
 };
 
@@ -59,245 +46,99 @@ const WHITE = "#FFFFFF";
 
 const escapeText = (s: string) => s ?? "";
 
-// ─── SVG Decorative Elements ───────────────────────────────────────────────────
-
-const DiagonalLines: React.FC<{ color: string; opacity?: number }> = ({
-  color,
-  opacity = 0.08,
-}) => (
-  <svg
-    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
-    viewBox="0 0 1080 1920"
-    preserveAspectRatio="xMidYMid slice"
-  >
-    {Array.from({ length: 20 }).map((_, i) => (
-      <line
-        key={i}
-        x1={i * 120 - 600}
-        y1={0}
-        x2={i * 120 + 400}
-        y2={1920}
-        stroke={color}
-        strokeWidth={1}
-        opacity={opacity}
-      />
-    ))}
-  </svg>
-);
-
-const CornerAccent: React.FC<{ color: string; position: "tl" | "tr" | "bl" | "br" }> = ({
-  color,
-  position,
-}) => {
-  const transforms: Record<string, string> = {
-    tl: "translate(0, 0)",
-    tr: "translate(1080, 0) scale(-1, 1)",
-    bl: "translate(0, 1920) scale(1, -1)",
-    br: "translate(1080, 1920) scale(-1, -1)",
-  };
-  return (
-    <svg
-      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
-      viewBox="0 0 1080 1920"
-      preserveAspectRatio="xMidYMid slice"
-    >
-      <g transform={transforms[position]}>
-        <path d={`M0,0 L200,0 L200,8 L8,8 L8,200 L0,200 Z`} fill={color} opacity={0.9} />
-        <path d={`M0,0 L100,0 L100,4 L4,4 L4,100 L0,100 Z`} fill={color} opacity={0.5} transform="translate(20,20)" />
-      </g>
-    </svg>
-  );
+const hexToRgb = (hex: string) => {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return { r, g, b };
 };
 
-const PulseRing: React.FC<{ x: number; y: number; color: string; size?: number }> = ({
-  x,
-  y,
-  color,
-  size = 60,
-}) => (
-  <svg
-    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
-    viewBox="0 0 1080 1920"
-    preserveAspectRatio="xMidYMid slice"
-  >
-    <circle cx={x} cy={y} r={size} fill="none" stroke={color} strokeWidth={2} opacity={0.3} />
-    <circle cx={x} cy={y} r={size * 0.6} fill="none" stroke={color} strokeWidth={1.5} opacity={0.5} />
-    <circle cx={x} cy={y} r={size * 0.25} fill={color} opacity={0.8} />
-  </svg>
-);
+// Luminance check — returns true if color is "light"
+const isLight = (hex: string) => {
+  const { r, g, b } = hexToRgb(hex || "#000000");
+  return (r * 299 + g * 587 + b * 114) / 1000 > 128;
+};
 
-// ─── Layout Variants ───────────────────────────────────────────────────────────
+// ─── Layout 1: SPLIT-BOTTOM ────────────────────────────────────────────────────
+// Archetype: Bold magazine editorial. Content anchored to the bottom third.
+// Dark gradient rises from the bottom. Image breathes in the top two-thirds.
+// Hallmark: Full-width headline, accent left border rule, badge pills top-right.
 
 const LayoutSplitBottom: React.FC<{
   props: SocialPostProps;
   frame: number;
   fps: number;
-}> = ({ props, frame, fps }) => {
+}> = ({ props }) => {
   const accent = props.accentColor || NEO_LIME;
-  const secondary = props.secondaryColor || "#00F0FF";
   const font = props.fontFamily || "'Montserrat', sans-serif";
+  const onAccent = isLight(accent) ? RAISIN_BLACK : WHITE;
 
   return (
     <>
-      {/* Gradient overlay */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: `linear-gradient(
-            180deg,
-            rgba(15,18,26,0.2) 0%,
-            rgba(15,18,26,0.1) 30%,
-            rgba(15,18,26,0.7) 55%,
-            rgba(15,18,26,0.97) 80%,
-            ${RAISIN_BLACK} 100%
-          )`,
-        }}
-      />
+      {/* Editorial bottom gradient — image shows fully at top */}
+      <div style={{
+        position: "absolute", inset: 0,
+        background: `linear-gradient(180deg, transparent 0%, transparent 35%, rgba(0,0,0,0.65) 60%, rgba(0,0,0,0.93) 80%, #000 100%)`,
+      }} />
 
-      {/* SVG decorative layer */}
-      <DiagonalLines color={accent} opacity={0.04} />
-      <CornerAccent color={accent} position="tl" />
-      <CornerAccent color={accent} position="br" />
+      {/* Accent bar — left edge running the full height of the content panel */}
+      <div style={{
+        position: "absolute", left: 0, bottom: 0,
+        width: 8, height: "52%",
+        background: `linear-gradient(180deg, transparent 0%, ${accent} 40%, ${accent} 100%)`,
+      }} />
 
-      {/* Brand badge top */}
-      {props.brandName && (
-        <div
-          style={{
-            position: "absolute",
-            top: 80,
-            left: 0,
-            right: 0,
-            display: "flex",
-            justifyContent: "center",
-          }}
-        >
-          <div
-            style={{
-              background: `${accent}22`,
-              border: `1.5px solid ${accent}66`,
-              borderRadius: 100,
-              padding: "10px 28px",
-              color: accent,
-              fontFamily: font,
-              fontWeight: 700,
-              fontSize: 28,
-              letterSpacing: 4,
+      {/* Badges — top-right floating pills */}
+      {props.badges && props.badges.length > 0 && (
+        <div style={{ position: "absolute", top: 72, right: 56, display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-end" }}>
+          {props.badges.map((b, i) => (
+            <div key={i} style={{
+              background: b.bgColor || accent,
+              borderRadius: 6, padding: "10px 22px",
+              color: b.color || onAccent,
+              fontFamily: font, fontWeight: 800,
+              fontSize: 22, letterSpacing: 3,
               textTransform: "uppercase",
-            }}
-          >
-            {escapeText(props.brandName)}
-          </div>
+            }}>{b.text}</div>
+          ))}
         </div>
       )}
 
-      {/* Bottom content panel */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          padding: "60px 64px 100px",
-        }}
-      >
-        {/* Badges */}
-        {props.badges && props.badges.length > 0 && (
-          <div style={{ display: "flex", gap: 12, marginBottom: 28, flexWrap: "wrap" }}>
-            {props.badges.map((b, i) => (
-              <div
-                key={i}
-                style={{
-                  background: b.bgColor || `${accent}25`,
-                  border: `1px solid ${b.color || accent}`,
-                  borderRadius: 8,
-                  padding: "8px 20px",
-                  color: b.color || accent,
-                  fontFamily: font,
-                  fontWeight: 700,
-                  fontSize: 22,
-                  letterSpacing: 2,
-                  textTransform: "uppercase",
-                }}
-              >
-                {b.text}
-              </div>
-            ))}
-          </div>
+      {/* Content panel */}
+      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "0 56px 80px 72px" }}>
+        {/* Brand label */}
+        {props.brandName && (
+          <div style={{
+            color: accent, fontFamily: font, fontWeight: 700,
+            fontSize: 24, letterSpacing: 5, textTransform: "uppercase",
+            marginBottom: 20, opacity: 0.9,
+          }}>{escapeText(props.brandName)}</div>
         )}
 
-        {/* Headline */}
-        <div
-          style={{
-            fontFamily: font,
-            fontWeight: 900,
-            fontSize: 76,
-            lineHeight: 1.05,
-            color: WHITE,
-            textTransform: "uppercase",
-            letterSpacing: -1,
-            marginBottom: 24,
-            WebkitTextStroke: "1px rgba(0,0,0,0.3)",
-          }}
-        >
-          {escapeText(props.headline)}
-        </div>
-
-        {/* Accent rule */}
-        <div
-          style={{
-            width: 80,
-            height: 4,
-            background: accent,
-            borderRadius: 2,
-            marginBottom: 24,
-          }}
-        />
+        {/* Headline — huge, left-aligned, white */}
+        <div style={{
+          fontFamily: font, fontWeight: 900, fontSize: 88,
+          lineHeight: 0.97, color: WHITE,
+          textTransform: "uppercase", letterSpacing: -2,
+          marginBottom: 28,
+        }}>{escapeText(props.headline)}</div>
 
         {/* Subheadline */}
         {props.subheadline && (
-          <div
-            style={{
-              fontFamily: font,
-              fontWeight: 500,
-              fontSize: 34,
-              lineHeight: 1.4,
-              color: "rgba(255,255,255,0.8)",
-              marginBottom: 40,
-            }}
-          >
-            {escapeText(props.subheadline)}
-          </div>
+          <div style={{
+            fontFamily: font, fontWeight: 400, fontSize: 32,
+            lineHeight: 1.45, color: "rgba(255,255,255,0.72)",
+            marginBottom: 36, maxWidth: 880,
+          }}>{escapeText(props.subheadline)}</div>
         )}
 
-        {/* Highlights row */}
+        {/* Stats row */}
         {props.highlights && props.highlights.length > 0 && (
-          <div style={{ display: "flex", gap: 40, marginBottom: 40 }}>
+          <div style={{ display: "flex", gap: 48, marginBottom: 36 }}>
             {props.highlights.slice(0, 3).map((h, i) => (
-              <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <div
-                  style={{
-                    fontFamily: font,
-                    fontWeight: 900,
-                    fontSize: 52,
-                    color: accent,
-                    lineHeight: 1,
-                  }}
-                >
-                  {h.stat}
-                </div>
-                <div
-                  style={{
-                    fontFamily: font,
-                    fontWeight: 500,
-                    fontSize: 24,
-                    color: "rgba(255,255,255,0.6)",
-                    textTransform: "uppercase",
-                    letterSpacing: 2,
-                  }}
-                >
-                  {h.label}
-                </div>
+              <div key={i}>
+                <div style={{ fontFamily: font, fontWeight: 900, fontSize: 56, color: accent, lineHeight: 1 }}>{h.stat}</div>
+                <div style={{ fontFamily: font, fontSize: 22, color: "rgba(255,255,255,0.5)", letterSpacing: 2, textTransform: "uppercase", marginTop: 4 }}>{h.label}</div>
               </div>
             ))}
           </div>
@@ -305,41 +146,24 @@ const LayoutSplitBottom: React.FC<{
 
         {/* CTA */}
         {props.cta && (
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 16,
-              background: accent,
-              borderRadius: 16,
-              padding: "22px 48px",
-              color: RAISIN_BLACK,
-              fontFamily: font,
-              fontWeight: 900,
-              fontSize: 32,
-              letterSpacing: 1,
-              textTransform: "uppercase",
-            }}
-          >
+          <div style={{
+            display: "inline-flex", alignItems: "center", gap: 14,
+            background: accent, borderRadius: 12,
+            padding: "20px 44px",
+            color: onAccent, fontFamily: font,
+            fontWeight: 900, fontSize: 30,
+            letterSpacing: 1, textTransform: "uppercase",
+          }}>
             {escapeText(props.cta)}
-            <svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-              <path d="M5 12H19M19 12L12 5M19 12L12 19" stroke={RAISIN_BLACK} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+            <svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+              <path d="M5 12H19M19 12L12 5M19 12L12 19" stroke={onAccent} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
         )}
 
         {/* Tagline */}
         {props.tagline && (
-          <div
-            style={{
-              fontFamily: font,
-              fontWeight: 400,
-              fontSize: 22,
-              color: "rgba(255,255,255,0.4)",
-              marginTop: 24,
-              letterSpacing: 1,
-            }}
-          >
+          <div style={{ fontFamily: font, fontSize: 22, color: "rgba(255,255,255,0.38)", marginTop: 20, letterSpacing: 1 }}>
             {escapeText(props.tagline)}
           </div>
         )}
@@ -348,285 +172,377 @@ const LayoutSplitBottom: React.FC<{
   );
 };
 
+// ─── Layout 2: CENTER-PUNCH ────────────────────────────────────────────────────
+// Archetype: Full-bleed cinematic impact. Heavy overlay, centered composition.
+// Hallmark: Massive headline with glow, NO corner brackets, radial vignette,
+// optional floating stat chips in a horizontal row below the headline.
+
 const LayoutCenterPunch: React.FC<{
   props: SocialPostProps;
   frame: number;
   fps: number;
-}> = ({ props, frame, fps }) => {
+}> = ({ props }) => {
   const accent = props.accentColor || NEO_LIME;
+  const secondary = props.secondaryColor || "#FF6B35";
   const font = props.fontFamily || "'Montserrat', sans-serif";
+  const onAccent = isLight(accent) ? RAISIN_BLACK : WHITE;
 
   return (
     <>
-      {/* Dark vignette */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: `radial-gradient(ellipse at center, rgba(15,18,26,0.4) 0%, rgba(15,18,26,0.9) 80%, ${RAISIN_BLACK} 100%)`,
-        }}
-      />
+      {/* Radial cinematic vignette — no linear gradient */}
+      <div style={{
+        position: "absolute", inset: 0,
+        background: `radial-gradient(ellipse 90% 85% at 50% 50%, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.82) 70%, #000 100%)`,
+      }} />
 
-      <DiagonalLines color={accent} opacity={0.05} />
-      <PulseRing x={540} y={960} color={accent} size={360} />
-      <CornerAccent color={accent} position="tl" />
-      <CornerAccent color={accent} position="tr" />
+      {/* Horizontal accent bar top */}
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 6, background: `linear-gradient(90deg, ${accent}, ${secondary}, ${accent})` }} />
 
-      {/* Center content */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "80px 80px",
-          textAlign: "center",
-        }}
-      >
-        {/* Accent top line */}
-        <div style={{ width: 60, height: 4, background: accent, borderRadius: 2, marginBottom: 40 }} />
+      {/* Brand — centered at top */}
+      {props.brandName && (
+        <div style={{
+          position: "absolute", top: 72, left: 0, right: 0,
+          display: "flex", justifyContent: "center",
+        }}>
+          <div style={{
+            background: "rgba(0,0,0,0.5)", border: `1.5px solid ${accent}55`,
+            borderRadius: 100, padding: "10px 32px",
+            color: accent, fontFamily: font,
+            fontWeight: 700, fontSize: 26,
+            letterSpacing: 5, textTransform: "uppercase",
+          }}>{escapeText(props.brandName)}</div>
+        </div>
+      )}
 
-        {props.brandName && (
-          <div
-            style={{
-              color: accent,
-              fontFamily: font,
-              fontWeight: 700,
-              fontSize: 26,
-              letterSpacing: 6,
-              textTransform: "uppercase",
-              marginBottom: 40,
-            }}
-          >
-            {escapeText(props.brandName)}
+      {/* Center-stage content */}
+      <div style={{
+        position: "absolute", inset: 0,
+        display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        padding: "120px 80px", textAlign: "center",
+      }}>
+        {/* Badges */}
+        {props.badges && props.badges.length > 0 && (
+          <div style={{ display: "flex", gap: 12, marginBottom: 40, justifyContent: "center" }}>
+            {props.badges.map((b, i) => (
+              <div key={i} style={{
+                background: b.bgColor || `${accent}25`,
+                border: `1px solid ${b.color || accent}`,
+                borderRadius: 6, padding: "8px 20px",
+                color: b.color || accent,
+                fontFamily: font, fontWeight: 700,
+                fontSize: 22, letterSpacing: 2, textTransform: "uppercase",
+              }}>{b.text}</div>
+            ))}
           </div>
         )}
 
-        <div
-          style={{
-            fontFamily: font,
-            fontWeight: 900,
-            fontSize: 90,
-            lineHeight: 1.0,
-            color: WHITE,
-            textTransform: "uppercase",
-            letterSpacing: -2,
-            marginBottom: 36,
-            textShadow: `0 0 60px ${accent}40`,
-          }}
-        >
-          {escapeText(props.headline)}
+        {/* Massive headline with text glow */}
+        <div style={{
+          fontFamily: font, fontWeight: 900, fontSize: 100,
+          lineHeight: 0.95, color: WHITE,
+          textTransform: "uppercase", letterSpacing: -3,
+          marginBottom: 40,
+          textShadow: `0 0 80px ${accent}60, 0 0 160px ${accent}30`,
+        }}>{escapeText(props.headline)}</div>
+
+        {/* Accent separator dot line */}
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
+          <div style={{ height: 2, width: 80, background: `${accent}80` }} />
+          <div style={{ width: 10, height: 10, borderRadius: "50%", background: accent }} />
+          <div style={{ height: 2, width: 80, background: `${accent}80` }} />
         </div>
 
-        <div style={{ width: 80, height: 4, background: accent, borderRadius: 2, margin: "0 auto 36px" }} />
-
+        {/* Subheadline */}
         {props.subheadline && (
-          <div
-            style={{
-              fontFamily: font,
-              fontWeight: 500,
-              fontSize: 36,
-              lineHeight: 1.4,
-              color: "rgba(255,255,255,0.75)",
-              marginBottom: 60,
-              maxWidth: 800,
-            }}
-          >
-            {escapeText(props.subheadline)}
-          </div>
+          <div style={{
+            fontFamily: font, fontWeight: 400, fontSize: 36,
+            lineHeight: 1.4, color: "rgba(255,255,255,0.75)",
+            marginBottom: 56, maxWidth: 820,
+          }}>{escapeText(props.subheadline)}</div>
         )}
 
+        {/* Stat chips — horizontal floating boxes */}
         {props.highlights && props.highlights.length > 0 && (
-          <div style={{ display: "flex", gap: 60, marginBottom: 60, justifyContent: "center" }}>
+          <div style={{ display: "flex", gap: 24, marginBottom: 56, justifyContent: "center", flexWrap: "wrap" }}>
             {props.highlights.slice(0, 3).map((h, i) => (
-              <div key={i} style={{ textAlign: "center" }}>
-                <div style={{ fontFamily: font, fontWeight: 900, fontSize: 64, color: accent, lineHeight: 1 }}>
-                  {h.stat}
-                </div>
-                <div
-                  style={{
-                    fontFamily: font,
-                    fontWeight: 500,
-                    fontSize: 22,
-                    color: "rgba(255,255,255,0.55)",
-                    letterSpacing: 2,
-                    textTransform: "uppercase",
-                    marginTop: 8,
-                  }}
-                >
-                  {h.label}
-                </div>
+              <div key={i} style={{
+                background: "rgba(255,255,255,0.08)",
+                border: `1px solid rgba(255,255,255,0.15)`,
+                borderRadius: 16, padding: "20px 32px", textAlign: "center",
+                backdropFilter: "blur(8px)",
+              }}>
+                <div style={{ fontFamily: font, fontWeight: 900, fontSize: 64, color: accent, lineHeight: 1 }}>{h.stat}</div>
+                <div style={{ fontFamily: font, fontSize: 22, color: "rgba(255,255,255,0.5)", letterSpacing: 2, textTransform: "uppercase", marginTop: 6 }}>{h.label}</div>
               </div>
             ))}
           </div>
         )}
 
+        {/* CTA — pill shape */}
         {props.cta && (
-          <div
-            style={{
-              background: accent,
-              borderRadius: 100,
-              padding: "24px 56px",
-              color: RAISIN_BLACK,
-              fontFamily: font,
-              fontWeight: 900,
-              fontSize: 30,
-              letterSpacing: 2,
-              textTransform: "uppercase",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 16,
-            }}
-          >
-            {escapeText(props.cta)}
-          </div>
+          <div style={{
+            background: accent, borderRadius: 100,
+            padding: "24px 64px",
+            color: onAccent, fontFamily: font,
+            fontWeight: 900, fontSize: 32,
+            letterSpacing: 2, textTransform: "uppercase",
+          }}>{escapeText(props.cta)}</div>
         )}
       </div>
     </>
   );
 };
 
+// ─── Layout 3: TOP-TITLE ───────────────────────────────────────────────────────
+// Archetype: Editorial magazine with image as hero. Content floats at the top.
+// Hallmark: Semi-transparent frosted card anchored top-left, image fills bottom,
+// CTA is a ghost/outline button at the bottom. Clean two-zone design.
+
 const LayoutTopTitle: React.FC<{
   props: SocialPostProps;
   frame: number;
   fps: number;
-}> = ({ props, frame, fps }) => {
+}> = ({ props }) => {
   const accent = props.accentColor || NEO_LIME;
+  const secondary = props.secondaryColor || "#FFFFFF";
   const font = props.fontFamily || "'Montserrat', sans-serif";
+  const onAccent = isLight(accent) ? RAISIN_BLACK : WHITE;
 
   return (
     <>
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: `linear-gradient(
-            180deg,
-            rgba(15,18,26,0.92) 0%,
-            rgba(15,18,26,0.6) 45%,
-            rgba(15,18,26,0.15) 65%,
-            rgba(15,18,26,0.85) 100%
-          )`,
-        }}
-      />
-      <DiagonalLines color={accent} opacity={0.04} />
-      <CornerAccent color={accent} position="tl" />
-      <CornerAccent color={accent} position="br" />
+      {/* Light top vignette so image shows in the bottom half */}
+      <div style={{
+        position: "absolute", inset: 0,
+        background: `linear-gradient(180deg, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.70) 38%, rgba(0,0,0,0.1) 58%, rgba(0,0,0,0.7) 88%, rgba(0,0,0,0.92) 100%)`,
+      }} />
 
-      {/* Top content block */}
-      <div style={{ position: "absolute", top: 0, left: 0, right: 0, padding: "80px 64px 0" }}>
-        {props.brandName && (
-          <div
-            style={{
-              color: accent,
-              fontFamily: font,
-              fontWeight: 700,
-              fontSize: 26,
-              letterSpacing: 5,
-              textTransform: "uppercase",
-              marginBottom: 32,
-            }}
-          >
-            {escapeText(props.brandName)}
+      {/* Frosted card panel — top area */}
+      <div style={{
+        position: "absolute", top: 0, left: 0, right: 0,
+        padding: "80px 64px 56px",
+        background: "rgba(0,0,0,0.15)",
+        borderBottom: `3px solid ${accent}33`,
+      }}>
+        {/* Accent left bracket */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 28 }}>
+          <div style={{ width: 6, height: "100%", minHeight: 160, background: accent, borderRadius: 3, flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            {/* Brand */}
+            {props.brandName && (
+              <div style={{
+                color: accent, fontFamily: font, fontWeight: 700,
+                fontSize: 24, letterSpacing: 5, textTransform: "uppercase",
+                marginBottom: 20,
+              }}>{escapeText(props.brandName)}</div>
+            )}
+
+            {/* Badges inline */}
+            {props.badges && props.badges.length > 0 && (
+              <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
+                {props.badges.map((b, i) => (
+                  <div key={i} style={{
+                    background: b.bgColor || accent,
+                    borderRadius: 4, padding: "6px 16px",
+                    color: b.color || onAccent,
+                    fontFamily: font, fontWeight: 800,
+                    fontSize: 20, letterSpacing: 2, textTransform: "uppercase",
+                  }}>{b.text}</div>
+                ))}
+              </div>
+            )}
+
+            {/* Headline */}
+            <div style={{
+              fontFamily: font, fontWeight: 900, fontSize: 78,
+              lineHeight: 1.0, color: WHITE,
+              textTransform: "uppercase", letterSpacing: -2,
+              marginBottom: 24,
+            }}>{escapeText(props.headline)}</div>
+
+            {/* Subheadline */}
+            {props.subheadline && (
+              <div style={{
+                fontFamily: font, fontWeight: 400, fontSize: 30,
+                lineHeight: 1.5, color: "rgba(255,255,255,0.75)",
+              }}>{escapeText(props.subheadline)}</div>
+            )}
           </div>
-        )}
-
-        {/* Thin rule */}
-        <div style={{ width: 56, height: 4, background: accent, borderRadius: 2, marginBottom: 32 }} />
-
-        <div
-          style={{
-            fontFamily: font,
-            fontWeight: 900,
-            fontSize: 82,
-            lineHeight: 1.02,
-            color: WHITE,
-            textTransform: "uppercase",
-            letterSpacing: -1,
-            marginBottom: 28,
-          }}
-        >
-          {escapeText(props.headline)}
         </div>
-
-        {props.subheadline && (
-          <div
-            style={{
-              fontFamily: font,
-              fontWeight: 500,
-              fontSize: 32,
-              lineHeight: 1.5,
-              color: "rgba(255,255,255,0.75)",
-            }}
-          >
-            {escapeText(props.subheadline)}
-          </div>
-        )}
       </div>
 
-      {/* Bottom CTA */}
-      {(props.cta || props.tagline) && (
-        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "0 64px 100px" }}>
-          {props.highlights && props.highlights.length > 0 && (
-            <div style={{ display: "flex", gap: 40, marginBottom: 40 }}>
-              {props.highlights.slice(0, 3).map((h, i) => (
-                <div key={i}>
-                  <div style={{ fontFamily: font, fontWeight: 900, fontSize: 54, color: accent, lineHeight: 1 }}>
-                    {h.stat}
-                  </div>
-                  <div
-                    style={{
-                      fontFamily: font,
-                      fontSize: 22,
-                      color: "rgba(255,255,255,0.55)",
-                      letterSpacing: 2,
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {h.label}
-                  </div>
-                </div>
-              ))}
+      {/* Stats — mid-screen floating row */}
+      {props.highlights && props.highlights.length > 0 && (
+        <div style={{
+          position: "absolute",
+          bottom: props.cta ? 220 : 140,
+          left: 0, right: 0,
+          display: "flex", justifyContent: "center", gap: 0,
+          padding: "0 40px",
+        }}>
+          {props.highlights.slice(0, 3).map((h, i) => (
+            <div key={i} style={{
+              flex: 1, textAlign: "center",
+              padding: "24px 16px",
+              borderRight: i < 2 ? `1px solid rgba(255,255,255,0.15)` : "none",
+              background: "rgba(0,0,0,0.4)",
+              backdropFilter: "blur(12px)",
+            }}>
+              <div style={{ fontFamily: font, fontWeight: 900, fontSize: 60, color: accent, lineHeight: 1 }}>{h.stat}</div>
+              <div style={{ fontFamily: font, fontSize: 22, color: "rgba(255,255,255,0.55)", letterSpacing: 2, textTransform: "uppercase", marginTop: 8 }}>{h.label}</div>
             </div>
-          )}
+          ))}
+        </div>
+      )}
+
+      {/* Bottom zone — CTA + tagline */}
+      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "0 64px 80px" }}>
+        {props.cta && (
+          <div style={{
+            border: `2.5px solid ${accent}`,
+            borderRadius: 12,
+            padding: "20px 44px",
+            display: "inline-flex", alignItems: "center", gap: 16,
+            color: accent, fontFamily: font,
+            fontWeight: 900, fontSize: 30,
+            letterSpacing: 1, textTransform: "uppercase",
+          }}>
+            {escapeText(props.cta)}
+            <svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+              <path d="M5 12H19M19 12L12 5M19 12L12 19" stroke={accent} strokeWidth={2.5} strokeLinecap="round" />
+            </svg>
+          </div>
+        )}
+        {props.tagline && (
+          <div style={{ fontFamily: font, fontSize: 22, color: "rgba(255,255,255,0.38)", marginTop: 20 }}>{escapeText(props.tagline)}</div>
+        )}
+      </div>
+    </>
+  );
+};
+
+// ─── Layout 4: LOWER-THIRD ─────────────────────────────────────────────────────
+// Archetype: Broadcast chyron / data dashboard. Image dominates the full frame.
+// A glassy ticker/chyron bar at the bottom carries brand + headline.
+// Hallmark: Minimal text, huge white space, bold typography in a tight band.
+// Stats appear as a horizontal strip above the chyron.
+
+const LayoutLowerThird: React.FC<{
+  props: SocialPostProps;
+  frame: number;
+  fps: number;
+}> = ({ props }) => {
+  const accent = props.accentColor || NEO_LIME;
+  const secondary = props.secondaryColor || "#FFFFFF";
+  const font = props.fontFamily || "'Montserrat', sans-serif";
+  const onAccent = isLight(accent) ? RAISIN_BLACK : WHITE;
+
+  return (
+    <>
+      {/* Very subtle top vignette — image is the hero */}
+      <div style={{
+        position: "absolute", inset: 0,
+        background: `linear-gradient(180deg, rgba(0,0,0,0.3) 0%, transparent 30%, transparent 55%, rgba(0,0,0,0.75) 80%, rgba(0,0,0,0.97) 100%)`,
+      }} />
+
+      {/* Badges top-left */}
+      {props.badges && props.badges.length > 0 && (
+        <div style={{ position: "absolute", top: 72, left: 56, display: "flex", gap: 12 }}>
+          {props.badges.map((b, i) => (
+            <div key={i} style={{
+              background: b.bgColor || accent,
+              borderRadius: 6, padding: "10px 22px",
+              color: b.color || onAccent,
+              fontFamily: font, fontWeight: 800,
+              fontSize: 24, letterSpacing: 3, textTransform: "uppercase",
+            }}>{b.text}</div>
+          ))}
+        </div>
+      )}
+
+      {/* Stats strip — floating above the chyron */}
+      {props.highlights && props.highlights.length > 0 && (
+        <div style={{
+          position: "absolute",
+          bottom: 300,
+          left: 0, right: 0,
+          display: "flex",
+        }}>
+          {props.highlights.slice(0, 3).map((h, i) => (
+            <div key={i} style={{
+              flex: 1, textAlign: "center",
+              padding: "28px 24px",
+              background: i % 2 === 0 ? `${accent}E6` : "rgba(0,0,0,0.75)",
+              backdropFilter: "blur(10px)",
+            }}>
+              <div style={{
+                fontFamily: font, fontWeight: 900, fontSize: 72,
+                color: i % 2 === 0 ? onAccent : accent, lineHeight: 1,
+              }}>{h.stat}</div>
+              <div style={{
+                fontFamily: font, fontSize: 24,
+                color: i % 2 === 0 ? `${onAccent}BB` : "rgba(255,255,255,0.55)",
+                letterSpacing: 2, textTransform: "uppercase", marginTop: 8,
+              }}>{h.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Chyron bar — the signature of this layout */}
+      <div style={{
+        position: "absolute", bottom: 0, left: 0, right: 0,
+        background: `${accent}`,
+        padding: "32px 56px 56px",
+        borderTop: `6px solid ${isLight(accent) ? "rgba(0,0,0,0.2)" : "rgba(255,255,255,0.15)"}`,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24 }}>
+          <div style={{ flex: 1 }}>
+            {props.brandName && (
+              <div style={{
+                fontFamily: font, fontWeight: 700, fontSize: 22,
+                letterSpacing: 5, textTransform: "uppercase",
+                color: `${onAccent}88`, marginBottom: 10,
+              }}>{escapeText(props.brandName)}</div>
+            )}
+            <div style={{
+              fontFamily: font, fontWeight: 900, fontSize: 60,
+              lineHeight: 1.0, color: onAccent,
+              textTransform: "uppercase", letterSpacing: -1,
+            }}>{escapeText(props.headline)}</div>
+            {props.subheadline && (
+              <div style={{
+                fontFamily: font, fontWeight: 500, fontSize: 26,
+                color: `${onAccent}CC`, marginTop: 12, lineHeight: 1.35,
+              }}>{escapeText(props.subheadline)}</div>
+            )}
+          </div>
+
+          {/* CTA arrow box */}
           {props.cta && (
-            <div
-              style={{
-                background: accent,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 14,
-                borderRadius: 14,
-                padding: "20px 44px",
-                color: RAISIN_BLACK,
-                fontFamily: font,
-                fontWeight: 900,
-                fontSize: 30,
-                textTransform: "uppercase",
-              }}
-            >
+            <div style={{
+              background: isLight(accent) ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.15)",
+              border: `2px solid ${onAccent}44`,
+              borderRadius: 12, padding: "20px 32px",
+              color: onAccent, fontFamily: font,
+              fontWeight: 900, fontSize: 24,
+              letterSpacing: 1, textTransform: "uppercase",
+              textAlign: "center", minWidth: 200, flexShrink: 0,
+            }}>
               {escapeText(props.cta)}
-              <svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-                <path d="M5 12H19M19 12L12 5M19 12L12 19" stroke={RAISIN_BLACK} strokeWidth={2.5} strokeLinecap="round" />
-              </svg>
-            </div>
-          )}
-          {props.tagline && (
-            <div
-              style={{
-                fontFamily: font,
-                fontSize: 22,
-                color: "rgba(255,255,255,0.4)",
-                marginTop: 20,
-              }}
-            >
-              {escapeText(props.tagline)}
+              <div style={{ marginTop: 8 }}>
+                <svg width={28} height={28} viewBox="0 0 24 24" fill="none" style={{ margin: "0 auto", display: "block" }}>
+                  <path d="M12 5v14M5 12l7 7 7-7" stroke={onAccent} strokeWidth={2.5} strokeLinecap="round" />
+                </svg>
+              </div>
             </div>
           )}
         </div>
-      )}
+
+        {props.tagline && (
+          <div style={{ fontFamily: font, fontSize: 20, color: `${onAccent}70`, marginTop: 16 }}>{escapeText(props.tagline)}</div>
+        )}
+      </div>
     </>
   );
 };
@@ -644,8 +560,9 @@ export const SocialPost: React.FC<SocialPostProps> = (props) => {
         return <LayoutCenterPunch props={props} frame={frame} fps={fps} />;
       case "top-title":
         return <LayoutTopTitle props={props} frame={frame} fps={fps} />;
-      case "split-bottom":
       case "lower-third":
+        return <LayoutLowerThird props={props} frame={frame} fps={fps} />;
+      case "split-bottom":
       default:
         return <LayoutSplitBottom props={props} frame={frame} fps={fps} />;
     }
@@ -653,20 +570,14 @@ export const SocialPost: React.FC<SocialPostProps> = (props) => {
 
   return (
     <AbsoluteFill style={{ background: RAISIN_BLACK }}>
-      {/* Background image (Pexels) */}
       <Img
         src={props.backgroundImageUrl}
         style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          objectPosition: "center",
+          position: "absolute", inset: 0,
+          width: "100%", height: "100%",
+          objectFit: "cover", objectPosition: "center",
         }}
       />
-
-      {/* Layout-specific overlays */}
       {renderLayout()}
     </AbsoluteFill>
   );
