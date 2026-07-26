@@ -33,7 +33,7 @@ export const Root: React.FC = () => {
         durationInFrames={30 * 125}
         fps={30}
         width={1080}
-        height={1920}
+        height={1350}
       />
       {/* 16:9 variant for verifying landscape templates side-by-side. */}
       <Composition
