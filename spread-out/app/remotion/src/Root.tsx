@@ -64,8 +64,8 @@ export const Root: React.FC = () => {
       <Still
         id="SocialPost"
         component={SocialPost}
-        width={typed.width}
-        height={typed.height}
+        width={1080}
+        height={1350}
         defaultProps={{
           headline: "Your Headline Here",
           subheadline: "Supporting copy that drives action.",
@@ -81,8 +81,8 @@ export const Root: React.FC = () => {
       <Still
         id="SocialPostSquare"
         component={SocialPost}
-        width={typed.width}
-        height={typed.height}
+        width={1080}
+        height={1080}
         defaultProps={{
           headline: "Your Headline Here",
           backgroundImageUrl: "https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg",
