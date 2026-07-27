@@ -570,14 +570,24 @@ export const SocialPost: React.FC<SocialPostProps> = (props) => {
 
   return (
     <AbsoluteFill style={{ background: RAISIN_BLACK }}>
-      <Img
-        src={props.backgroundImageUrl}
-        style={{
-          position: "absolute", inset: 0,
-          width: "100%", height: "100%",
-          objectFit: "cover", objectPosition: "center",
-        }}
-      />
+      {/* 4:5 Cropped Background Image Container */}
+      <div style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: 1080,
+        height: 1350, // Force 4:5 aspect ratio
+        overflow: "hidden"
+      }}>
+        <Img
+          src={props.backgroundImageUrl}
+          style={{
+            position: "absolute", inset: 0,
+            width: "100%", height: "100%",
+            objectFit: "cover", objectPosition: "center",
+          }}
+        />
+      </div>
       {renderLayout()}
     </AbsoluteFill>
   );
