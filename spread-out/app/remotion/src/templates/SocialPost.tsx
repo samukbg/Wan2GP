@@ -148,15 +148,13 @@ const LayoutSplitBottom: React.FC<{
         {props.cta && (
           <div style={{
             display: "inline-flex", alignItems: "center", gap: 14,
-            background: accent, borderRadius: 12,
-            padding: "20px 44px",
-            color: onAccent, fontFamily: font,
+            color: accent, fontFamily: font,
             fontWeight: 900, fontSize: 30,
             letterSpacing: 1, textTransform: "uppercase",
           }}>
             {escapeText(props.cta)}
             <svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-              <path d="M5 12H19M19 12L12 5M19 12L12 19" stroke={onAccent} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M5 12H19M19 12L12 5M19 12L12 19" stroke={accent} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
         )}
@@ -279,12 +277,10 @@ const LayoutCenterPunch: React.FC<{
           </div>
         )}
 
-        {/* CTA — pill shape */}
+        {/* CTA — floating text */}
         {props.cta && (
           <div style={{
-            background: accent, borderRadius: 100,
-            padding: "24px 64px",
-            color: onAccent, fontFamily: font,
+            color: accent, fontFamily: font,
             fontWeight: 900, fontSize: 32,
             letterSpacing: 2, textTransform: "uppercase",
           }}>{escapeText(props.cta)}</div>
@@ -399,9 +395,6 @@ const LayoutTopTitle: React.FC<{
       <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "0 64px 80px" }}>
         {props.cta && (
           <div style={{
-            border: `2.5px solid ${accent}`,
-            borderRadius: 12,
-            padding: "20px 44px",
             display: "inline-flex", alignItems: "center", gap: 16,
             color: accent, fontFamily: font,
             fontWeight: 900, fontSize: 30,
@@ -518,13 +511,10 @@ const LayoutLowerThird: React.FC<{
             )}
           </div>
 
-          {/* CTA arrow box */}
+          {/* CTA text */}
           {props.cta && (
             <div style={{
-              background: isLight(accent) ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.15)",
-              border: `2px solid ${onAccent}44`,
-              borderRadius: 12, padding: "20px 32px",
-              color: onAccent, fontFamily: font,
+              color: accent, fontFamily: font,
               fontWeight: 900, fontSize: 24,
               letterSpacing: 1, textTransform: "uppercase",
               textAlign: "center", minWidth: 200, flexShrink: 0,
@@ -532,7 +522,7 @@ const LayoutLowerThird: React.FC<{
               {escapeText(props.cta)}
               <div style={{ marginTop: 8 }}>
                 <svg width={28} height={28} viewBox="0 0 24 24" fill="none" style={{ margin: "0 auto", display: "block" }}>
-                  <path d="M12 5v14M5 12l7 7 7-7" stroke={onAccent} strokeWidth={2.5} strokeLinecap="round" />
+                  <path d="M12 5v14M5 12l7 7 7-7" stroke={accent} strokeWidth={2.5} strokeLinecap="round" />
                 </svg>
               </div>
             </div>
