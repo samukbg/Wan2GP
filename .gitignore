@@ -27,6 +27,7 @@
 *.exe
 cache
 __pycache__/
+spread-out/app/remotion/node_modules/
 shared/gradio/wangp_image_editor/templates/component/index.js.map
 storage/
 samples/

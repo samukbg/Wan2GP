@@ -37,6 +37,22 @@ def get_npx_command():
         return "npx"
     return "npx"
 
+def get_hyperframes_env() -> Dict[str, str]:
+    env = os.environ.copy()
+    env["HF_VIDEO_COVERAGE_THRESHOLD"] = "0"
+    if "PRODUCER_HEADLESS_SHELL_PATH" not in env:
+        candidates = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        ]
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                env["PRODUCER_HEADLESS_SHELL_PATH"] = candidate
+                break
+    return env
+
 def ensure_hyperframes_env():
     """Ensure ffmpeg and chrome are available for hyperframes."""
     # Ensure ffmpeg is on PATH
@@ -48,7 +64,7 @@ def ensure_hyperframes_env():
             print("[Hyperframes] Ensuring browser environment...")
             cmd = get_npx_command()
             use_shell = (os.name == "nt")
-            subprocess.run([cmd, "-y", "hyperframes", "browser", "ensure"], check=True, capture_output=True, shell=use_shell)
+            subprocess.run([cmd, "-y", "hyperframes", "browser", "ensure"], check=True, capture_output=True, shell=use_shell, env=get_hyperframes_env())
             print("[Hyperframes] Browser environment ready.")
         except Exception as e:
             print(f"[Hyperframes] Warning during browser ensure: {e}")
@@ -401,8 +417,7 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
         
         print(f"[Hyperframes] Running: {' '.join(cmd)}")
         use_shell = (os.name == "nt")
-        custom_env = os.environ.copy()
-        custom_env["HF_VIDEO_COVERAGE_THRESHOLD"] = "0"
+        custom_env = get_hyperframes_env()
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=use_shell, env=custom_env)
         
         for line in process.stdout:
@@ -491,7 +506,7 @@ def hyperframes_transcribe_task(data: Dict[str, Any], input_path: str, execution
         
         executions[execution_id]["progress"] = 10
         use_shell = (os.name == "nt")
-        process = subprocess.run(cmd, capture_output=True, text=True, shell=use_shell)
+        process = subprocess.run(cmd, capture_output=True, text=True, shell=use_shell, env=get_hyperframes_env())
         
         if process.returncode != 0:
             raise RuntimeError(f"Hyperframes Transcribe failed: {process.stderr}")
