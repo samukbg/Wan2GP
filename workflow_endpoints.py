@@ -275,7 +275,8 @@ def get_render_status(execution_id: str):
     return status
 
 def _preprocess_hyperframes_html(html: str, dest_dir: str) -> str:
-    """Scan HTML for external media URLs, download them locally, and replace the URLs with local paths."""
+    """Scan HTML for external media URLs, download them locally, and replace the URLs with local paths.
+    If a download fails (e.g. 404/410), skip the media URL by clearing it to prevent broken network requests."""
     if not html:
         return html
     # Support URLs with escaped slashes like https:\/\/...
@@ -293,6 +294,7 @@ def _preprocess_hyperframes_html(html: str, dest_dir: str) -> str:
         dest_path = os.path.join(dest_dir, filename)
         
         print(f"[Hyperframes] Pre-downloading media: {clean_url} -> {filename}")
+        success = False
         try:
             headers = {
                 "User-Agent": "Mozilla/5.0",
@@ -301,25 +303,30 @@ def _preprocess_hyperframes_html(html: str, dest_dir: str) -> str:
             resp = requests.get(clean_url, headers=headers, stream=True, timeout=60)
             if resp.status_code == 200:
                 content_type = resp.headers.get("Content-Type", "")
-                if "text/html" in content_type:
-                    print(f"[Hyperframes] Pre-download failed for {clean_url}: returned HTML (Bot Protection). Skipping replacement.")
-                    continue
-                
-                with open(dest_path, "wb") as f:
-                    for chunk in resp.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                
-                if os.path.getsize(dest_path) == 0:
-                    print(f"[Hyperframes] Pre-download failed: 0 bytes downloaded for {clean_url}. Skipping replacement.")
-                    os.remove(dest_path)
-                    continue
-
-                html = html.replace(raw_url, f"./{filename}")
-                print(f"[Hyperframes] Pre-download successful for {clean_url}")
+                if "text/html" not in content_type:
+                    with open(dest_path, "wb") as f:
+                        for chunk in resp.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                    
+                    if os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
+                        success = True
+                        print(f"[Hyperframes] Pre-download successful for {clean_url}")
+                    else:
+                        print(f"[Hyperframes] Pre-download failed: 0 bytes downloaded for {clean_url}.")
+                        if os.path.exists(dest_path):
+                            os.remove(dest_path)
+                else:
+                    print(f"[Hyperframes] Pre-download failed for {clean_url}: returned HTML (Bot Protection).")
             else:
                 print(f"[Hyperframes] Pre-download failed for {clean_url} with status {resp.status_code}")
         except Exception as e:
             print(f"[Hyperframes] Pre-download error for {clean_url}: {e}")
+        
+        if success and os.path.exists(dest_path):
+            html = html.replace(raw_url, f"./{filename}")
+        else:
+            print(f"[Hyperframes] Skipping failed media URL: {clean_url}")
+            html = html.replace(raw_url, "")
             
     return html
 
