@@ -133,7 +133,7 @@ const LayoutSplitBottom: React.FC<{
         )}
 
         {/* Stats row */}
-        {props.highlights && props.highlights.length > 0 && (
+        {Array.isArray(props.highlights) && props.highlights.length > 0 && (
           <div style={{ display: "flex", gap: 48, marginBottom: 36 }}>
             {props.highlights.slice(0, 3).map((h, i) => (
               <div key={i}>
@@ -220,7 +220,7 @@ const LayoutCenterPunch: React.FC<{
         padding: "120px 80px", textAlign: "center",
       }}>
         {/* Badges */}
-        {props.badges && props.badges.length > 0 && (
+        {Array.isArray(props.badges) && props.badges.length > 0 && (
           <div style={{ display: "flex", gap: 12, marginBottom: 40, justifyContent: "center" }}>
             {props.badges.map((b, i) => (
               <div key={i} style={{
@@ -261,7 +261,7 @@ const LayoutCenterPunch: React.FC<{
         )}
 
         {/* Stat chips — horizontal floating boxes */}
-        {props.highlights && props.highlights.length > 0 && (
+        {Array.isArray(props.highlights) && props.highlights.length > 0 && (
           <div style={{ display: "flex", gap: 24, marginBottom: 56, justifyContent: "center", flexWrap: "wrap" }}>
             {props.highlights.slice(0, 3).map((h, i) => (
               <div key={i} style={{
@@ -334,7 +334,7 @@ const LayoutTopTitle: React.FC<{
             )}
 
             {/* Badges inline */}
-            {props.badges && props.badges.length > 0 && (
+            {Array.isArray(props.badges) && props.badges.length > 0 && (
               <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
                 {props.badges.map((b, i) => (
                   <div key={i} style={{
@@ -368,7 +368,7 @@ const LayoutTopTitle: React.FC<{
       </div>
 
       {/* Stats — mid-screen floating row */}
-      {props.highlights && props.highlights.length > 0 && (
+      {Array.isArray(props.highlights) && props.highlights.length > 0 && (
         <div style={{
           position: "absolute",
           bottom: props.cta ? 220 : 140,
