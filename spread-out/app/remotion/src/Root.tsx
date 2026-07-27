@@ -32,8 +32,8 @@ export const Root: React.FC = () => {
         component={StyleShowcase}
         durationInFrames={30 * 125}
         fps={30}
-        width={1080}
-        height={1350}
+        width={typed.width}
+        height={typed.height}
       />
       {/* 16:9 variant for verifying landscape templates side-by-side. */}
       <Composition
@@ -41,31 +41,31 @@ export const Root: React.FC = () => {
         component={StyleShowcase}
         durationInFrames={30 * 125}
         fps={30}
-        width={1920}
-        height={1080}
+        width={typed.width}
+        height={typed.height}
       />
       <Composition
         id="DarkGridFrame"
         component={DarkGridFrame}
         durationInFrames={1}
         fps={30}
-        width={1080}
-        height={1920}
+        width={typed.width}
+        height={typed.height}
       />
       <Composition
         id="LightGridFrame"
         component={LightGridFrame}
         durationInFrames={1}
         fps={30}
-        width={1080}
-        height={1920}
+        width={typed.width}
+        height={typed.height}
       />
       {/* ─── Still compositions (social post images) ─────────────────────── */}
       <Still
         id="SocialPost"
         component={SocialPost}
-        width={1080}
-        height={1920}
+        width={typed.width}
+        height={typed.height}
         defaultProps={{
           headline: "Your Headline Here",
           subheadline: "Supporting copy that drives action.",
@@ -81,8 +81,8 @@ export const Root: React.FC = () => {
       <Still
         id="SocialPostSquare"
         component={SocialPost}
-        width={1080}
-        height={1080}
+        width={typed.width}
+        height={typed.height}
         defaultProps={{
           headline: "Your Headline Here",
           backgroundImageUrl: "https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg",
