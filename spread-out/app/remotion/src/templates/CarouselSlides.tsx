@@ -57,7 +57,16 @@ const css = `
 
 export const SlideBase: React.FC<{props: SocialPostProps, children: React.ReactNode}> = ({props, children}) => {
   const accent = props.accentColor || '#CFFF05';
-  const logo = props.logoUrl ? <Img className="logo-top-white" src={props.logoUrl} style={{objectFit: 'contain', maxHeight: 80}}/> : (
+  const [logoFailed, setLogoFailed] = React.useState(false);
+
+  const logo = (props.logoUrl && !logoFailed) ? (
+    <img 
+      className="logo-top-white" 
+      src={props.logoUrl} 
+      style={{objectFit: 'contain', maxHeight: 80}}
+      onError={() => setLogoFailed(true)}
+    />
+  ) : (
     <div className="logo-top-white" style={{color: 'white', fontSize: 32, fontWeight: 800}}>{props.brandName}</div>
   );
   return (
