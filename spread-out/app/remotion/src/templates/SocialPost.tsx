@@ -7,6 +7,18 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
+import {
+  LayoutSlide01,
+  LayoutSlide02,
+  LayoutSlide03,
+  LayoutSlide04,
+  LayoutSlide05,
+  LayoutSlide06,
+  LayoutSlide07,
+  LayoutSlide08,
+  LayoutSlide09
+} from "./CarouselSlides";
+import { SocialPostProps } from "./SocialPostTypes";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -22,21 +34,6 @@ export type SocialPostHighlight = {
   icon?: string;
 };
 
-export type SocialPostProps = {
-  headline: string;
-  subheadline?: string;
-  cta?: string;
-  backgroundImageUrl: string;
-  brandName?: string;
-  layout?: "split-bottom" | "top-title" | "center-punch" | "lower-third";
-  accentColor?: string;
-  secondaryColor?: string;
-  overlayOpacity?: number;
-  badges?: SocialPostBadge[];
-  highlights?: SocialPostHighlight[];
-  tagline?: string;
-  fontFamily?: string;
-};
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -546,6 +543,15 @@ export const SocialPost: React.FC<SocialPostProps> = (props) => {
 
   const renderLayout = () => {
     switch (layout) {
+      case "slide-01": return <LayoutSlide01 props={props} />;
+      case "slide-02": return <LayoutSlide02 props={props} />;
+      case "slide-03": return <LayoutSlide03 props={props} />;
+      case "slide-04": return <LayoutSlide04 props={props} />;
+      case "slide-05": return <LayoutSlide05 props={props} />;
+      case "slide-06": return <LayoutSlide06 props={props} />;
+      case "slide-07": return <LayoutSlide07 props={props} />;
+      case "slide-08": return <LayoutSlide08 props={props} />;
+      case "slide-09": return <LayoutSlide09 props={props} />;
       case "center-punch":
         return <LayoutCenterPunch props={props} frame={frame} fps={fps} />;
       case "top-title":

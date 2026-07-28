@@ -222,7 +222,6 @@ export const DashboardCard: React.FC<DashboardCardProps> = ({
               opacity: tileOp,
               transform: `translateY(${tileTy}px)`,
               display: "flex", flexDirection: "column",
-              position: "absolute",
               overflow: "hidden",
             }}>
               {/* Top row: label + tiny sparkline */}
