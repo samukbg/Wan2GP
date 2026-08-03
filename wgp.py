@@ -1,8 +1,7 @@
 import os, sys, traceback
 os.environ["GRADIO_LANG"] = "en"
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "garbage_collection_threshold:0.5,expandable_segments:True"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "garbage_collection_threshold:0.8"
 import warnings
-warnings.filterwarnings("ignore", category=UserWarning, message=".*expandable_segments.*")
 
 
 def safe_cuda_cleanup():
