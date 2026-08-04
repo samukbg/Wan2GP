@@ -1,0 +1,6 @@
+{
+  "title": "My Awesome Post",
+  "content": "This is a social post rendered with Playwright instead of Remotion!",
+  "backgroundImageUrl": "https://images.pexels.com/photos/1035103/pexels-photo-1035103.jpeg",
+  "layoutType": "slide-01"
+}
