@@ -9,6 +9,7 @@ import {
   Easing,
 } from "remotion";
 import { DarkGridBg } from "./Backgrounds";
+import { SafeImg } from "../SafeImg";
 import { useTypeBase } from "./motion";
 
 const resolveSrc = (s: string): string => /^https?:\/\//i.test(s) ? s : staticFile(s);
@@ -138,7 +139,7 @@ export const AnnotatedScreenshot: React.FC<AnnotatedScreenshotProps> = ({ image_
         transform: `translate(${camX}px, ${camY}px) scale(${camScale})`,
         transformOrigin: "center",
       }}>
-        <Img onError={(e) => { e.currentTarget.style.display = 'none'; }}
+        <SafeImg
           src={resolveSrc(image_path)}
           style={{
             position: "absolute",
@@ -196,7 +197,7 @@ export const AnnotatedScreenshot: React.FC<AnnotatedScreenshotProps> = ({ image_
               opacity: popIn,
               pointerEvents: "none",
             }}>
-              <Img onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              <SafeImg
                 src={resolveSrc(image_path)}
                 style={{
                   position: "absolute",

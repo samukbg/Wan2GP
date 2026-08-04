@@ -1,4 +1,5 @@
 import { AbsoluteFill, Img, staticFile, useVideoConfig } from "remotion";
+import { SafeImg } from "../SafeImg";
 import { useFadeRise, useSettleZoom, useSpringIn, useTypeBase } from "./motion";
 
 export type AIImageOnGridProps = {
@@ -34,7 +35,7 @@ export const AIImageOnGrid: React.FC<AIImageOnGridProps> = ({ src, caption }) =>
         transform: `scale(${zoom})`,
         transformOrigin: "center",
       }}>
-        <Img onError={(e) => { e.currentTarget.style.display = 'none'; }}
+        <SafeImg
           src={resolveSrc(src)}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />

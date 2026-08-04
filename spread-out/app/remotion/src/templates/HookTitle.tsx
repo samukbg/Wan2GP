@@ -8,6 +8,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { SMOOTH_EASE, useTypeBase } from "./motion";
+import { SafeImg } from "../SafeImg";
 
 /**
  * HOOK TITLE — the premium cold-open text treatment.
@@ -336,7 +337,7 @@ export const HookTitle: React.FC<HookTitleProps> = ({
                     boxSizing: "border-box",
                     display: "flex", alignItems: "center", justifyContent: "center",
                   }}>
-                    <Img onError={(e) => { e.currentTarget.style.display = 'none'; }} src={
+                    <SafeImg src={
                       lp.startsWith("http") || lp.startsWith("data:")
                         ? lp : staticFile(lp)
                     } style={{

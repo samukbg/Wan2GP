@@ -1,4 +1,5 @@
 import React from 'react';
+import { SafeImg } from "../SafeImg";
 import { SocialPostProps } from './SocialPost';
 import { Img } from 'remotion';
 
@@ -60,7 +61,7 @@ export const SlideBase: React.FC<{props: SocialPostProps, children: React.ReactN
   const [logoFailed, setLogoFailed] = React.useState(false);
 
   const logo = (props.logoUrl && !logoFailed) ? (
-    <img onError={(e) => { e.currentTarget.style.display = 'none'; }}
+    <img
       className="logo-top-white" 
       src={props.logoUrl} 
       style={{objectFit: 'contain', maxHeight: 80}}

@@ -7,6 +7,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { useTypeBase } from "./motion";
+import { SafeImg } from "../SafeImg";
 
 /**
  * IMAGE CARD — a b-roll image shown in a glassy card in the BOTTOM HALF of
@@ -98,7 +99,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({ src, caption }) => {
           overflow: "hidden",
           backgroundColor: RAISIN,
         }}>
-          <Img onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          <SafeImg
             src={src}
             style={{
               width: "100%",

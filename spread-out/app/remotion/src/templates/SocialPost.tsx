@@ -19,6 +19,7 @@ import {
   LayoutSlide09
 } from "./CarouselSlides";
 import { SocialPostProps } from "./SocialPostTypes";
+import { SafeImg } from "../SafeImg";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -575,8 +576,7 @@ export const SocialPost: React.FC<SocialPostProps> = (props) => {
         height: 1350, // Force 4:5 aspect ratio
         overflow: "hidden"
       }}>
-        <Img
-          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+        <SafeImg
           src={props.backgroundImageUrl}
           style={{
             position: "absolute", inset: 0,

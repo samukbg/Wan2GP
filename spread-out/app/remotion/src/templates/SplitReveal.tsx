@@ -9,6 +9,7 @@ import {
   Easing,
 } from "remotion";
 import { useTypeBase } from "./motion";
+import { SafeImg } from "../SafeImg";
 
 const resolveSrc = (s: string): string => /^https?:\/\//i.test(s) ? s : staticFile(s);
 
@@ -100,7 +101,7 @@ export const SplitReveal: React.FC<SplitRevealProps> = ({
         transformOrigin: "center",
       }}>
         {/* Before image (full frame, underneath) */}
-        <Img onError={(e) => { e.currentTarget.style.display = 'none'; }}
+        <SafeImg
           src={resolveSrc(before_image)}
           style={{
             position: "absolute", inset: 0,
@@ -115,7 +116,7 @@ export const SplitReveal: React.FC<SplitRevealProps> = ({
           position: "absolute", inset: 0,
           clipPath: `inset(0 ${100 - wipeProg * 100}% 0 0)`,
         }}>
-          <Img onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          <SafeImg
             src={resolveSrc(after_image)}
             style={{
               position: "absolute", inset: 0,

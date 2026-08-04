@@ -8,6 +8,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { useTypeBase } from "./motion";
+import { SafeImg } from "../SafeImg";
 
 /**
  * TOOL LOGO BURST — small rounded-square brand thumbs in scattered slots,
@@ -123,7 +124,7 @@ export const ToolLogoBurst: React.FC<ToolLogoBurstProps> = ({
               display: "flex", alignItems: "center", justifyContent: "center",
             }}>
               {it.image_path ? (
-                <Img onError={(e) => { e.currentTarget.style.display = 'none'; }} src={resolveSrc(it.image_path)} style={{
+                <SafeImg src={resolveSrc(it.image_path)} style={{
                   width: "100%", height: "100%", objectFit: "contain",
                   display: "block",
                 }} />
