@@ -695,7 +695,7 @@ async def take_screenshot(payload):
         await browser.close()
         return output_path
 
-def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: str):
+def playwright_render_task(data: Dict[str, Any], output_path: str, execution_id: str):
     executions[execution_id] = {"status": "processing", "progress": 0}
     try:
         serve_url = data.get("serve_url")
@@ -787,7 +787,7 @@ def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: s
         print(f"Playwright render failed: {e}")
         executions[execution_id] = {"status": "failed", "error": str(e)}
 
-def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: str):
+def playwright_still_task(data: Dict[str, Any], output_path: str, execution_id: str):
     executions[execution_id] = {"status": "processing", "progress": 0}
     try:
         serve_url = data.get("serve_url")
@@ -873,31 +873,31 @@ def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: st
         print(f"Playwright still complete: {output_path}")
             
     except Exception as e:
-        print(f"Remotion still failed: {e}")
+        print(f"Playwright still failed: {e}")
         executions[execution_id] = {"status": "failed", "error": str(e)}
 
-@router.post("/remotion/render")
-async def remotion_render(request: Request, background_tasks: BackgroundTasks):
+@router.post("/playwright/render")
+async def playwright_render(request: Request, background_tasks: BackgroundTasks):
     try: data = await request.json()
     except: return JSONResponse({"error": "Invalid JSON"}, status_code=400)
     
     execution_id = data.get("execution_id", str(uuid.uuid4()))
-    output_path = os.path.join("outputs", f"remotion_{execution_id}.mp4")
+    output_path = os.path.join("outputs", f"playwright_{execution_id}.mp4")
     os.makedirs("outputs", exist_ok=True)
     
-    background_tasks.add_task(remotion_render_task, data, output_path, execution_id)
+    background_tasks.add_task(playwright_render_task, data, output_path, execution_id)
     return {"status": "queued", "execution_id": execution_id, "output_url": f"/file={output_path}"}
 
-@router.post("/remotion/render_still")
-async def remotion_render_still(request: Request, background_tasks: BackgroundTasks):
+@router.post("/playwright/render_still")
+async def playwright_render_still(request: Request, background_tasks: BackgroundTasks):
     try: data = await request.json()
     except: return JSONResponse({"error": "Invalid JSON"}, status_code=400)
     
     execution_id = data.get("execution_id", str(uuid.uuid4()))
-    output_path = os.path.join("outputs", f"remotion_{execution_id}.jpg")
+    output_path = os.path.join("outputs", f"playwright_{execution_id}.jpg")
     os.makedirs("outputs", exist_ok=True)
     
-    background_tasks.add_task(remotion_still_task, data, output_path, execution_id)
+    background_tasks.add_task(playwright_still_task, data, output_path, execution_id)
     return {"status": "queued", "execution_id": execution_id, "output_url": f"/file={output_path}"}
 
 def setup_workflow_endpoints(app):
