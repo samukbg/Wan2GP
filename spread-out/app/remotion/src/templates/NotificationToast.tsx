@@ -128,7 +128,7 @@ export const NotificationToast: React.FC<NotificationToastProps> = ({
           boxShadow: "0 1px 2px rgba(0,0,0,0.20)",
         }}>
           {app_icon ? (
-            <Img src={resolveSrc(app_icon)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <Img onError={(e) => { e.currentTarget.style.display = 'none'; }} src={resolveSrc(app_icon)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           ) : (
             <div style={{
               position: "absolute",

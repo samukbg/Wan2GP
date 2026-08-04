@@ -60,7 +60,7 @@ export const SlideBase: React.FC<{props: SocialPostProps, children: React.ReactN
   const [logoFailed, setLogoFailed] = React.useState(false);
 
   const logo = (props.logoUrl && !logoFailed) ? (
-    <img 
+    <img onError={(e) => { e.currentTarget.style.display = 'none'; }}
       className="logo-top-white" 
       src={props.logoUrl} 
       style={{objectFit: 'contain', maxHeight: 80}}

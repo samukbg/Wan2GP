@@ -138,7 +138,7 @@ export const AnnotatedScreenshot: React.FC<AnnotatedScreenshotProps> = ({ image_
         transform: `translate(${camX}px, ${camY}px) scale(${camScale})`,
         transformOrigin: "center",
       }}>
-        <Img
+        <Img onError={(e) => { e.currentTarget.style.display = 'none'; }}
           src={resolveSrc(image_path)}
           style={{
             position: "absolute",
@@ -196,7 +196,7 @@ export const AnnotatedScreenshot: React.FC<AnnotatedScreenshotProps> = ({ image_
               opacity: popIn,
               pointerEvents: "none",
             }}>
-              <Img
+              <Img onError={(e) => { e.currentTarget.style.display = 'none'; }}
                 src={resolveSrc(image_path)}
                 style={{
                   position: "absolute",

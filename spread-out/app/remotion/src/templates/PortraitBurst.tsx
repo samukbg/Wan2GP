@@ -112,7 +112,7 @@ export const PortraitBurst: React.FC<PortraitBurstProps> = ({
               boxShadow: `0 ${size * 0.04}px ${size * 0.10}px rgba(0,0,0,0.55), 0 0 ${size * 0.05}px rgba(207,255,5,0.35)`,
               background: "#0F121A",
             }}>
-              <Img src={resolveSrc(it.image_path)} style={{
+              <Img onError={(e) => { e.currentTarget.style.display = 'none'; }} src={resolveSrc(it.image_path)} style={{
                 width: "100%", height: "100%", objectFit: "cover",
                 display: "block",
               }} />

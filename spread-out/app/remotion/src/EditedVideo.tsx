@@ -455,6 +455,7 @@ const StaticOverlay: React.FC<{ broll: BRoll; intensity: number }> = ({ broll, i
       }}>
         {isCardMode ? (
           <Img
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
             src={resolveSrc(broll.image_path ?? "")}
             style={{
               position: "absolute",
@@ -472,6 +473,7 @@ const StaticOverlay: React.FC<{ broll: BRoll; intensity: number }> = ({ broll, i
           />
         ) : (
           <Img
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
             src={resolveSrc(broll.image_path ?? "")}
             style={{
               width: "100%", height: "100%",
@@ -718,6 +720,7 @@ const IconOverlay: React.FC<{ broll: BRoll }> = ({ broll }) => {
     return (
       <AbsoluteFill style={{ pointerEvents: "none" }}>
         <Img
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
           src={resolveSrc(broll.image_path ?? "")}
           style={{
             position: "absolute",
@@ -746,7 +749,7 @@ const IconOverlay: React.FC<{ broll: BRoll }> = ({ broll }) => {
         padding,
         boxSizing: "border-box",
       }}>
-        <Img src={resolveSrc(broll.image_path ?? "")} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+        <Img onError={(e) => { e.currentTarget.style.display = 'none'; }} src={resolveSrc(broll.image_path ?? "")} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
       </div>
     </AbsoluteFill>
   );
@@ -1508,6 +1511,7 @@ export const EditedVideo: React.FC<EditedVideoProps> = ({
             transformOrigin: "center",
           }}>
             <Img
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
               src={resolveSrc(`${speakerCutoutDir}/frame_${padded}.png`)}
               style={{ width: "100%", height: "100%", objectFit: "fill" }}
             />

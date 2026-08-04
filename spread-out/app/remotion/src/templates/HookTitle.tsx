@@ -336,7 +336,7 @@ export const HookTitle: React.FC<HookTitleProps> = ({
                     boxSizing: "border-box",
                     display: "flex", alignItems: "center", justifyContent: "center",
                   }}>
-                    <Img src={
+                    <Img onError={(e) => { e.currentTarget.style.display = 'none'; }} src={
                       lp.startsWith("http") || lp.startsWith("data:")
                         ? lp : staticFile(lp)
                     } style={{

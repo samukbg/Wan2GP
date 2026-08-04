@@ -98,7 +98,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({ src, caption }) => {
           overflow: "hidden",
           backgroundColor: RAISIN,
         }}>
-          <Img
+          <Img onError={(e) => { e.currentTarget.style.display = 'none'; }}
             src={src}
             style={{
               width: "100%",

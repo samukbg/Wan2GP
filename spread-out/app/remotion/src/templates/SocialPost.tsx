@@ -576,6 +576,7 @@ export const SocialPost: React.FC<SocialPostProps> = (props) => {
         overflow: "hidden"
       }}>
         <Img
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
           src={props.backgroundImageUrl}
           style={{
             position: "absolute", inset: 0,

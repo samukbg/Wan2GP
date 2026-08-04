@@ -123,7 +123,7 @@ export const ToolLogoBurst: React.FC<ToolLogoBurstProps> = ({
               display: "flex", alignItems: "center", justifyContent: "center",
             }}>
               {it.image_path ? (
-                <Img src={resolveSrc(it.image_path)} style={{
+                <Img onError={(e) => { e.currentTarget.style.display = 'none'; }} src={resolveSrc(it.image_path)} style={{
                   width: "100%", height: "100%", objectFit: "contain",
                   display: "block",
                 }} />

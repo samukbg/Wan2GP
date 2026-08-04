@@ -100,7 +100,7 @@ export const SplitReveal: React.FC<SplitRevealProps> = ({
         transformOrigin: "center",
       }}>
         {/* Before image (full frame, underneath) */}
-        <Img
+        <Img onError={(e) => { e.currentTarget.style.display = 'none'; }}
           src={resolveSrc(before_image)}
           style={{
             position: "absolute", inset: 0,
@@ -115,7 +115,7 @@ export const SplitReveal: React.FC<SplitRevealProps> = ({
           position: "absolute", inset: 0,
           clipPath: `inset(0 ${100 - wipeProg * 100}% 0 0)`,
         }}>
-          <Img
+          <Img onError={(e) => { e.currentTarget.style.display = 'none'; }}
             src={resolveSrc(after_image)}
             style={{
               position: "absolute", inset: 0,
