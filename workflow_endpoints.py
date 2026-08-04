@@ -730,58 +730,50 @@ def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: s
         input_props = data.get("input_props", {})
         
         if not serve_url:
-            raise ValueError("Missing required Remotion parameter: 'serve_url' (path to your Remotion app).")
+            raise ValueError("Missing required Playwright parameter: 'serve_url' (path to your Playwright app).")
             
-        npx_executable = get_npx_command()
-        
         # Write props to a temporary file to avoid complex Windows shell escaping issues
         fd, props_path = tempfile.mkstemp(suffix=".json", prefix="remotion_props_")
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             json.dump(input_props, f)
             
         if not os.path.exists(serve_url):
-            raise FileNotFoundError(f"Remotion entry point not found on server: {serve_url}")
+            raise FileNotFoundError(f"Entry point not found on server: {serve_url}")
             
-        # Find project root for cwd (look for package.json or remotion.config.ts)
-        project_root = os.path.dirname(serve_url)
+        # Find project root for cwd (look for package.json)
+        project_root = serve_url
+        if os.path.isfile(project_root):
+            project_root = os.path.dirname(project_root)
+            
         while project_root and project_root != os.path.dirname(project_root):
-            if os.path.exists(os.path.join(project_root, "package.json")) or os.path.exists(os.path.join(project_root, "remotion.config.ts")):
+            if os.path.exists(os.path.join(project_root, "package.json")):
                 break
             project_root = os.path.dirname(project_root)
             
-        entry_point = os.path.relpath(serve_url, project_root)
-        
         cmd = [
-            npx_executable, "-y", "-p", "@remotion/cli", "remotion", "render",
-            entry_point, composition, os.path.abspath(output_path),
+            "node", "render.js",
+            composition, os.path.abspath(output_path),
             "--props", props_path
         ]
         
         executions[execution_id]["progress"] = 10
-        print(f"[Remotion] Running locally in {project_root}: {' '.join(cmd)}")
+        print(f"[Playwright] Running locally in {project_root}: {' '.join(cmd)}")
         use_shell = (os.name == "nt")
         
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', shell=use_shell, cwd=project_root)
         
         # very simple progress simulation
         for line in process.stdout:
-            print(f"[Remotion] {line.strip()}")
+            print(f"[Playwright] {line.strip()}")
             executions[execution_id]["progress"] = min(90, executions[execution_id]["progress"] + 1)
             
         process.wait()
         
         if process.returncode != 0:
-            raise RuntimeError(f"Local Remotion render failed with exit code {process.returncode}")
+            raise RuntimeError(f"Local Playwright render failed with exit code {process.returncode}")
             
         if not os.path.exists(output_path):
-            print("[Remotion] Output file not found! Remotion may have exited early after a first-time browser download. Retrying render...")
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', shell=use_shell, cwd=project_root)
-            for line in process.stdout:
-                print(f"[Remotion Retry] {line.strip()}")
-            process.wait()
-            
-            if process.returncode != 0 or not os.path.exists(output_path):
-                raise FileNotFoundError(f"Remotion failed to create output file even after retry: {output_path}")
+            raise FileNotFoundError(f"Playwright failed to create output file: {output_path}")
                 
         try:
             os.remove(props_path)
@@ -789,10 +781,10 @@ def remotion_render_task(data: Dict[str, Any], output_path: str, execution_id: s
             pass
             
         executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
-        print(f"Remotion render complete: {output_path}")
+        print(f"Playwright render complete: {output_path}")
             
     except Exception as e:
-        print(f"Remotion render failed: {e}")
+        print(f"Playwright render failed: {e}")
         executions[execution_id] = {"status": "failed", "error": str(e)}
 
 def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: str):
@@ -831,54 +823,46 @@ def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: st
         frame = data.get("frame", 0)
         
         if not serve_url:
-            raise ValueError("Missing required Remotion parameter: 'serve_url' (path to your Remotion app).")
+            raise ValueError("Missing required Playwright parameter: 'serve_url' (path to your Playwright app).")
             
-        npx_executable = get_npx_command()
-        
         # Write props to a temporary file to avoid complex Windows shell escaping issues
         fd, props_path = tempfile.mkstemp(suffix=".json", prefix="remotion_props_")
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             json.dump(input_props, f)
             
         if not os.path.exists(serve_url):
-            raise FileNotFoundError(f"Remotion entry point not found on server: {serve_url}")
+            raise FileNotFoundError(f"Entry point not found on server: {serve_url}")
             
-        # Find project root for cwd (look for package.json or remotion.config.ts)
-        project_root = os.path.dirname(serve_url)
+        # Find project root for cwd (look for package.json)
+        project_root = serve_url
+        if os.path.isfile(project_root):
+            project_root = os.path.dirname(project_root)
+            
         while project_root and project_root != os.path.dirname(project_root):
-            if os.path.exists(os.path.join(project_root, "package.json")) or os.path.exists(os.path.join(project_root, "remotion.config.ts")):
+            if os.path.exists(os.path.join(project_root, "package.json")):
                 break
             project_root = os.path.dirname(project_root)
             
-        entry_point = os.path.relpath(serve_url, project_root)
-        
         cmd = [
-            npx_executable, "-y", "-p", "@remotion/cli", "remotion", "still",
-            entry_point, composition, os.path.abspath(output_path),
-            "--props", props_path,
-            "--frame", str(frame)
+            "node", "render.js",
+            composition, os.path.abspath(output_path),
+            "--props", props_path
         ]
         
         executions[execution_id]["progress"] = 10
-        print(f"[Remotion] Running locally in {project_root}: {' '.join(cmd)}")
+        print(f"[Playwright] Running locally in {project_root}: {' '.join(cmd)}")
         use_shell = (os.name == "nt")
         
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', shell=use_shell, cwd=project_root)
-        print(f"[Remotion] {process.stdout.read()}")
+        print(f"[Playwright] {process.stdout.read()}")
         
         process.wait()
             
         if process.returncode != 0:
-            raise RuntimeError(f"Local Remotion still failed with exit code {process.returncode}")
+            raise RuntimeError(f"Local Playwright still failed with exit code {process.returncode}")
             
         if not os.path.exists(output_path):
-            print("[Remotion] Output file not found! Remotion may have exited early after a first-time browser download. Retrying still...")
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', shell=use_shell, cwd=project_root)
-            print(f"[Remotion Retry] {process.stdout.read()}")
-            process.wait()
-            
-            if process.returncode != 0 or not os.path.exists(output_path):
-                raise FileNotFoundError(f"Remotion failed to create output file even after retry: {output_path}")
+            raise FileNotFoundError(f"Playwright failed to create output file: {output_path}")
                 
         try:
             os.remove(props_path)
@@ -886,7 +870,7 @@ def remotion_still_task(data: Dict[str, Any], output_path: str, execution_id: st
             pass
             
         executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
-        print(f"Remotion still complete: {output_path}")
+        print(f"Playwright still complete: {output_path}")
             
     except Exception as e:
         print(f"Remotion still failed: {e}")
