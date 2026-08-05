@@ -17,7 +17,8 @@ async function render() {
   const propsPath = args[propsArgIndex + 1];
   let props = {};
   if (fs.existsSync(propsPath)) {
-    props = JSON.parse(fs.readFileSync(propsPath, 'utf8'));
+    const rawProps = JSON.parse(fs.readFileSync(propsPath, 'utf8'));
+    props = rawProps.input_props ? rawProps.input_props : rawProps;
   } else {
     console.error(`Props file not found: ${propsPath}`);
     process.exit(1);
