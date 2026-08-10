@@ -118,15 +118,15 @@ export const LayoutSlide02: React.FC<{props: SocialPostProps}> = ({props}) => (
     <div className="top" style={{position:'absolute', top:120, left:64, right:64, zIndex:10}} />
     <div className="notif glass" style={{position:'absolute', bottom:180, left:52, right:52, zIndex:10, padding: '26px 28px 24px', borderRadius: 18}}>
       <div style={{display:'flex', alignItems:'center', gap:14, marginBottom:22}}>
-        <div style={{width:44, height:44, background:'rgba(0,255,128,0.14)', border:'1px solid var(--accent)', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--accent)', fontWeight:800}}>{props.brandName?.[0] || 'V'}</div>
+        <div style={{width:44, height:44, background:'rgba(0,255,128,0.14)', border:'1px solid var(--accent)', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--accent)', fontWeight:800}}>{props.brandName?.[0] ?? '◆'}</div>
         <span style={{fontSize:19, letterSpacing:'0.12em', color:'white', fontWeight:700, textTransform:'uppercase'}}>{props.brandName}</span>
-        <span style={{fontSize:19, color:'rgba(255,255,255,0.7)', marginLeft:'auto'}}>{props.badges?.[0]?.text || 'agora'}</span>
+        {props.badges?.[0]?.text && <span style={{fontSize:19, color:'rgba(255,255,255,0.7)', marginLeft:'auto'}}>{props.badges[0].text}</span>}
       </div>
       <div style={{fontFamily:'Georgia,serif', fontSize:66, letterSpacing:'-0.01em', color:'white', fontWeight:700, lineHeight:1, marginBottom:10}}>{props.headline}</div>
-      <div style={{fontFamily:'Georgia,serif', fontSize:110, color:'var(--accent)', fontWeight:700, textShadow:'0 0 60px rgba(0,255,128,0.55)', lineHeight:0.92, marginBottom:20}}>{props.highlights?.[0]?.stat || '-23%'}</div>
+      {props.highlights?.[0]?.stat && <div style={{fontFamily:'Georgia,serif', fontSize:110, color:'var(--accent)', fontWeight:700, textShadow:'0 0 60px rgba(0,255,128,0.55)', lineHeight:0.92, marginBottom:20}}>{props.highlights[0].stat}</div>}
       <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', borderTop:'1px solid rgba(0,255,128,0.20)', paddingTop:20}}>
         <span style={{fontSize:26, color:'white'}}>{props.subheadline}</span>
-        <span style={{fontSize:26, color:'var(--accent)', fontWeight:700}}>{props.cta || 'Garantir agora →'}</span>
+        {props.cta && <span style={{fontSize:26, color:'var(--accent)', fontWeight:700}}>{props.cta}</span>}
       </div>
     </div>
   </SlideBase>
@@ -156,7 +156,7 @@ export const LayoutSlide04: React.FC<{props: SocialPostProps}> = ({props}) => (
       <p className="body" style={{marginTop:24, fontSize:32, color:'rgba(255,255,255,0.85)'}}>{props.subheadline}</p>
     </div>
     <div className="chart-box glass" style={{position:'absolute', bottom:100, left:64, right:64, padding:'44px 44px 34px', borderRadius:20}}>
-      <p className="eyebrow" style={{marginBottom:14, fontSize:19}}>{props.highlights?.[0]?.label || 'SIMULAÇÃO'}</p>
+      {props.highlights?.[0]?.label && <p className="eyebrow" style={{marginBottom:14, fontSize:19}}>{props.highlights[0].label}</p>}
       <div style={{width:'100%', height:160, position:'relative'}}>
         <svg viewBox="0 0 952 160" preserveAspectRatio="none">
           <line x1="0" y1="40" x2="952" y2="40" stroke="rgba(255,255,255,0.07)" strokeWidth="1"/>
