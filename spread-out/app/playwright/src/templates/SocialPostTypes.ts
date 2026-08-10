@@ -13,4 +13,6 @@ export interface SocialPostProps {
   badges?: { text: string }[];
   highlights?: { stat: string; label: string }[];
   tagline?: string;
+  language?: string;
 }
+

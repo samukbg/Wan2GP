@@ -1,10 +1,26 @@
 import React from 'react';
 import { SafeImg } from "../SafeImg";
-import { SocialPostProps } from './SocialPost';
+import { SocialPostProps } from './SocialPostTypes';
 import { Img } from 'remotion';
 
 // Helpers
 const escapeText = (s?: string) => s ?? "";
+
+const t = (key: string, lang?: string): string => {
+  const translations: Record<string, Record<string, string>> = {
+    'your_purchase': { en: 'your purchase', pt: 'sua compra', es: 'tu compra', fr: 'votre achat', de: 'Ihr Kauf', it: 'il tuo acquisto' },
+    'credit_to_you': { en: 'credit → you', pt: 'crédito → você', es: 'crédito → ti', fr: 'crédit → vous', de: 'Kredit → Sie', it: 'credito → te' },
+    'before': { en: 'Before', pt: 'Antes', es: 'Antes', fr: 'Avant', de: 'Vorher', it: 'Prima' },
+    'after': { en: 'After', pt: 'Depois', es: 'Depois', fr: 'Après', de: 'Nachher', it: 'Dopo' },
+    'standard': { en: 'Standard', pt: 'Comum', es: 'Estándar', fr: 'Standard', de: 'Standard', it: 'Standard' },
+    'try_free': { en: 'Try For Free', pt: 'Experimente Grátis', es: 'Prueba Gratis', fr: 'Essayez Gratuitement', de: 'Kostenlos testen', it: 'Prova Gratis' },
+  };
+  const langKey = (lang || 'en').toLowerCase().slice(0, 2);
+  // Also handle full language names
+  const langMap: Record<string, string> = { english: 'en', portuguese: 'pt', português: 'pt', spanish: 'es', español: 'es', french: 'fr', français: 'fr', german: 'de', deutsch: 'de', italian: 'it', italiano: 'it' };
+  const resolved = langMap[(lang || 'en').toLowerCase()] || langMap[langKey] || langKey;
+  return translations[key]?.[resolved] || translations[key]?.en || key;
+};
 
 const css = `
 .slide {
@@ -149,13 +165,13 @@ export const LayoutSlide04: React.FC<{props: SocialPostProps}> = ({props}) => (
           <polyline points="0,50 140,60 280,44 380,80 460,118 600,156 780,148 952,110" fill="none" stroke="rgba(180,180,200,0.55)" strokeWidth="2.5" strokeLinejoin="round"/>
           <line x1="460" y1="0" x2="460" y2="160" stroke="var(--accent)" strokeWidth="2" strokeDasharray="6 4"/>
           <circle cx="460" cy="118" r="8" fill="var(--accent)"/>
-          <text x="472" y="22" fontSize="18" fill="var(--accent)" fontFamily="Segoe UI,sans-serif">sua compra</text>
-          <text x="600" y="128" fontSize="18" fill="var(--accent)" fontFamily="Segoe UI,sans-serif">crédito → você</text>
+          <text x="472" y="22" fontSize="18" fill="var(--accent)" fontFamily="Segoe UI,sans-serif">{t('your_purchase', props.language)}</text>
+          <text x="600" y="128" fontSize="18" fill="var(--accent)" fontFamily="Segoe UI,sans-serif">{t('credit_to_you', props.language)}</text>
         </svg>
       </div>
       <div style={{display:'flex', justifyContent:'space-between', marginTop:16, fontSize:21, color:'rgba(255,255,255,0.6)', fontWeight:600}}>
-        <span>Antes</span>
-        <span>Depois</span>
+        <span>{t('before', props.language)}</span>
+        <span>{t('after', props.language)}</span>
       </div>
     </div>
   </SlideBase>
@@ -193,7 +209,7 @@ export const LayoutSlide06: React.FC<{props: SocialPostProps}> = ({props}) => (
       <div className="glass" style={{marginTop: 64, borderRadius: 20, overflow: 'hidden'}}>
         <div style={{display:'grid', gridTemplateColumns:'1fr 150px 150px', padding:'24px 32px', background:'rgba(255,255,255,0.06)', borderBottom:'1px solid rgba(255,255,255,0.1)'}}>
           <div></div>
-          <div style={{fontSize:20, color:'rgba(255,255,255,0.5)', fontWeight:700, textTransform:'uppercase', textAlign:'center'}}>Comum</div>
+          <div style={{fontSize:20, color:'rgba(255,255,255,0.5)', fontWeight:700, textTransform:'uppercase', textAlign:'center'}}>{t('standard', props.language)}</div>
           <div style={{fontSize:20, color:'var(--accent)', fontWeight:700, textTransform:'uppercase', textAlign:'center'}}>{props.brandName}</div>
         </div>
         {props.highlights?.map((h, i) => (
@@ -255,7 +271,7 @@ export const LayoutSlide09: React.FC<{props: SocialPostProps}> = ({props}) => (
       
       <div style={{marginTop:100}}>
         <div style={{background:'var(--accent)', color:'rgba(7,17,31,1)', fontSize:36, fontWeight:800, padding:'32px 64px', borderRadius:80, display:'inline-block', textTransform:'uppercase', letterSpacing:'0.04em', boxShadow:'0 0 40px rgba(0,255,128,0.4), inset 0 -4px 0 rgba(0,0,0,0.1)'}}>
-          {props.cta || 'Experimente Grátis'}
+          {props.cta || t('try_free', props.language)}
         </div>
       </div>
     </div>
