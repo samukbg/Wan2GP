@@ -15,9 +15,9 @@
     "enable_4k_resolutions": 0,
     "max_reserved_loras": -1,
     "vae_config": 0,
-    "profile": 5,
-    "video_profile": 5,
-    "image_profile": 5,
+    "profile": 3,
+    "video_profile": 3,
+    "image_profile": 3,
     "audio_profile": 3.5,
     "preload_model_policy": [],
     "UI_theme": "default",
@@ -66,11 +66,11 @@
         "krea2_turbo": "krea2_turbo"
     },
     "last_model_type": "flux2_klein_9b",
-    "last_resolution_choice": "720x1280",
+    "last_resolution_choice": "1920x1088",
     "last_resolution_per_group": {
-        "720p": "720x1280",
+        "720p": "704x1280",
         "480p": "832x480",
-        "1080p": "832x1920"
+        "1080p": "1920x1088"
     },
     "last_advanced_choice": true,
     "prompt_enhancer_quantization": "quanto_int8",
