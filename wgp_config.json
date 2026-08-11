@@ -41,12 +41,13 @@
     "audio_stand_alone_output_codec": "wav",
     "last_model_per_family": {
         "ltx2": "ltx2_22B_distilled_1_1",
-        "wan2_2": "vace_14B_2_2",
+        "wan2_2": "i2v_2_2_Enhanced_Lightning_v2",
         "wan": "infinitetalk",
         "ltxv": "ltxv_13B",
         "flux2": "flux2_klein_9b",
         "ideogram4": "ideogram4",
-        "krea2": "krea2_turbo"
+        "krea2": "krea2_turbo",
+        "minimax_h3": "minimax_h3_ref2va_pruned"
     },
     "last_model_per_type": {
         "ltx2_19B": "ltx2_19B",
@@ -63,12 +64,20 @@
         "ideogram4": "ideogram4",
         "joyai_echo": "joyai_echo",
         "krea2_raw": "krea2_raw",
-        "krea2_turbo": "krea2_turbo"
+        "krea2_turbo": "krea2_turbo",
+        "minimax_h3_fl2va": "minimax_h3_fl2va",
+        "minimax_h3_fl2va_pruned": "minimax_h3_fl2va_pruned",
+        "minimax_h3_ref2va_pruned": "minimax_h3_ref2va_pruned",
+        "minimax_h3_ref2va": "minimax_h3_ref2va",
+        "ltx2_22B_msr": "ltx2_22B_msr",
+        "ti2v_2_2": "ti2v_2_2_fastwan",
+        "animate2": "animate2_distilled",
+        "i2v_2_2": "i2v_2_2_Enhanced_Lightning_v2"
     },
-    "last_model_type": "flux2_klein_9b",
-    "last_resolution_choice": "1920x1088",
+    "last_model_type": "minimax_h3_ref2va_pruned",
+    "last_resolution_choice": "1088x832",
     "last_resolution_per_group": {
-        "720p": "704x1280",
+        "720p": "1088x832",
         "480p": "832x480",
         "1080p": "1920x1088"
     },
@@ -98,37 +107,37 @@
     "spatial_upsamplers": {
         "flashvsr": {
             "mode": 1,
-            "persistence": 1,
             "backend": "auto",
             "topk_ratio": 0.0
         },
         "pid": {
-            "tiling_threshold": 0,
-            "persistence": 1
+            "version": "1.5",
+            "tiling_threshold": 0
         },
         "chain_of_zoom": {
-            "persistence": 1,
             "parallel_tile_processing": "auto"
+        },
+        "persistence": 1,
+        "seedvr2": {
+            "window_size": 0
         }
     },
-    "extensions_defaults_version": "1.17",
+    "extensions_defaults_version": "1.19",
     "installed_remote_plugins": [],
     "hdr_video_crf": 8,
     "audio_processors": {
         "mmaudio": {
-            "mode": 1,
-            "persistence": 1
+            "mode": 1
         },
         "seedvc": {
-            "mode": 2,
-            "persistence": 1
+            "mode": 2
         },
         "prismaudio": {
             "mode": 1,
-            "persistence": 1,
             "steps": 24,
             "cfg_scale": 5.0
-        }
+        },
+        "persistence": 1
     },
     "temporal_upsamplers": {
         "rife": {

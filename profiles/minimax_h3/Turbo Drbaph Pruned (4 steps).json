@@ -1,0 +1,8 @@
+{
+    "activated_loras": [
+        "https://huggingface.co/drbaph/MiniMax-H3-Turbo-Lora-ComfyUI/resolve/main/minimax_h3_turbo_v4_step600_pruned_comfyui.safetensors"
+    ],
+    "loras_multipliers": "1.0",
+    "num_inference_steps": 4,
+    "guidance_scale": 1
+}
