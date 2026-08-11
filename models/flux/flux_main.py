@@ -128,7 +128,7 @@ class model_factory:
             with torch.device("meta"):
                 self.vae  = AutoencoderKLFlux2(AutoEncoderParamsFlux2())
 
-            offload.load_model_data(self.vae, fl.locate_file("flux2_vae.safetensors"), writable_tensors= False, )
+            offload.load_model_data(self.vae, fl.locate_file("flux2_vae.safetensors"), writable_tensors=False, default_dtype=None)
             offload.change_dtype(self.vae, self.VAE_dtype, True)
             self.vae_scale_factor = 8
         else:
@@ -168,7 +168,7 @@ class model_factory:
                     hidden_size=3072, #self.hidden_size,
                     context_layer_norm=True,
                 )
-                offload.load_model_data(feature_embedder, model_filename[1], writable_tensors=False)
+                offload.load_model_data(feature_embedder, model_filename[1], writable_tensors=False, default_dtype=None)
         self.vision_encoder = siglip_model
         self.vision_encoder_processor = siglip_processor
         self.feature_embedder = feature_embedder
