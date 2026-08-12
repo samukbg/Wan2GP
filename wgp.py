@@ -13232,7 +13232,7 @@ def get_all_model_types():
     global model_types
     return list(model_types)
 
-def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None, sliding_window_size=None):
+def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None, sliding_window_size=None, prompt_enhancer=None):
     """
     A dedicated wrapper for the /generate API endpoint.
     Waits for sufficient RAM/VRAM, serialises concurrent requests, then delegates
@@ -13245,7 +13245,7 @@ def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale
         return _api_endpoint_handler_inner(
             model_type, prompt, num_inference_steps, guidance_scale,
             resolution, video_length, seed, image_mode, denoising_strength,
-            image_start, image_end, audio_input, override_profile, masking_strength, sliding_window_size
+            image_start, image_end, audio_input, override_profile, masking_strength, sliding_window_size, prompt_enhancer
         )
     finally:
         try:
@@ -13272,7 +13272,7 @@ def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale
             release_generation_slot()
 
 
-def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None, sliding_window_size=None):
+def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None, sliding_window_size=None, prompt_enhancer=None):
     global transformer_type
     import gc
     import torch
@@ -13531,6 +13531,8 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
             params['sliding_window_size'] = int(str(sliding_window_size).strip())
         except Exception:
             pass
+    if prompt_enhancer is not None:
+        params['prompt_enhancer'] = str(prompt_enhancer).strip()
     params['model_type'] = model_type
     params['prompt'] = prompt
     if num_inference_steps is not None:
