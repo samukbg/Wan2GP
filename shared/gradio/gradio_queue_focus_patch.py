@@ -581,7 +581,7 @@ def install() -> bool:
                 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
             for route in app.routes:
-                if route.path == "/":
+                if getattr(route, "path", None) == "/":
                     orig = route.endpoint
                     @functools.wraps(orig)
                     def wrapped(*args, **kwargs):
