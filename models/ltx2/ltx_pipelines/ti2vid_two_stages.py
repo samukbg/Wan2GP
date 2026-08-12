@@ -520,8 +520,10 @@ class TI2VidTwoStagesPipeline:
             if return_latent_slice is not None:
                 latent_slice = video_state.latent[:, :, return_latent_slice].detach().to("cpu")
             if frozen_output_video is None:
+                video_latent = [video_state.latent]
+                video_state = None
                 decoded_video = vae_decode_video_to_tensor(
-                    video_state.latent,
+                    video_latent,
                     self._get_stage_model(1, "video_decoder"),
                     tiling_config,
                     expected_frames=int(stage_1_output_shape.frames),
@@ -737,8 +739,10 @@ class TI2VidTwoStagesPipeline:
         if return_latent_slice is not None:
             latent_slice = video_state.latent[:, :, return_latent_slice].detach().to("cpu")
         if frozen_output_video is None:
+            video_latent = [video_state.latent]
+            video_state = None
             decoded_video = vae_decode_video_to_tensor(
-                video_state.latent,
+                video_latent,
                 self._get_stage_model(2, "video_decoder"),
                 tiling_config,
                 expected_frames=int(stage_2_output_shape.frames),
