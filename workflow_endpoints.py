@@ -677,8 +677,16 @@ async def record_website(payload):
             os.rename(video_path, output_path)
         return {"status": "completed", "output_url": output_path}
 
-async def take_screenshot(payload):
+@router.post("/take_screenshot")
+@router.post("/take-screenshot")
+async def take_screenshot(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
     url = payload.get("url")
+    if not url:
+        return JSONResponse({"error": "Missing 'url' parameter"}, status_code=400)
     width = payload.get("width", 1080)
     height = payload.get("height", 1920)
     
@@ -686,14 +694,17 @@ async def take_screenshot(payload):
     output_path = os.path.join("outputs", output_filename)
     os.makedirs("outputs", exist_ok=True)
     
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(args=["--no-sandbox"])
-        page = await browser.new_page(viewport={"width": width, "height": height})
-        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        await asyncio.sleep(3)
-        await page.screenshot(path=output_path, type="jpeg", quality=90)
-        await browser.close()
-        return output_path
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(args=["--no-sandbox"])
+            page = await browser.new_page(viewport={"width": width, "height": height})
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            await asyncio.sleep(3)
+            await page.screenshot(path=output_path, type="jpeg", quality=90)
+            await browser.close()
+        return {"status": "completed", "output_path": output_path, "output_url": output_path}
+    except Exception as e:
+        return JSONResponse({"status": "failed", "error": str(e)}, status_code=500)
 
 def playwright_render_task(data: Dict[str, Any], output_path: str, execution_id: str):
     executions[execution_id] = {"status": "processing", "progress": 0}
