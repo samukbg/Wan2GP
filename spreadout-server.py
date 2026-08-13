@@ -59,6 +59,9 @@ with gr.Blocks(title="WanGP API Server", css=css) as demo:
             api_gen_audio_input = gr.Textbox(label="Audio Input")
             api_gen_override_profile = gr.Number(label="Override Profile", value=-1)
             api_gen_masking_strength = gr.Number(label="Masking Strength", value=0.0)
+            api_gen_sliding_window_size = gr.Number(label="Sliding Window Size", value=129)
+            api_gen_prompt_enhancer = gr.Textbox(label="Prompt Enhancer")
+            api_gen_negative_prompt = gr.Textbox(label="Negative Prompt")
         
         api_gen_btn = gr.Button("Generate API")
         api_gen_output = gr.File(label="Output")
@@ -69,7 +72,8 @@ with gr.Blocks(title="WanGP API Server", css=css) as demo:
                 api_gen_model_type, api_gen_prompt, api_gen_steps, api_gen_guidance,
                 api_gen_resolution, api_gen_length, api_gen_seed, api_gen_image_mode,
                 api_gen_denoising, api_gen_image_start, api_gen_image_end, api_gen_audio_input,
-                api_gen_override_profile, api_gen_masking_strength
+                api_gen_override_profile, api_gen_masking_strength, api_gen_sliding_window_size,
+                api_gen_prompt_enhancer, api_gen_negative_prompt
             ],
             outputs=api_gen_output,
             api_name="generate"

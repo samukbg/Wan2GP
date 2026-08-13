@@ -13232,7 +13232,7 @@ def get_all_model_types():
     global model_types
     return list(model_types)
 
-def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None, sliding_window_size=None, prompt_enhancer=None):
+def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None, sliding_window_size=None, prompt_enhancer=None, negative_prompt=None):
     """
     A dedicated wrapper for the /generate API endpoint.
     Waits for sufficient RAM/VRAM, serialises concurrent requests, then delegates
@@ -13245,7 +13245,7 @@ def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale
         return _api_endpoint_handler_inner(
             model_type, prompt, num_inference_steps, guidance_scale,
             resolution, video_length, seed, image_mode, denoising_strength,
-            image_start, image_end, audio_input, override_profile, masking_strength, sliding_window_size, prompt_enhancer
+            image_start, image_end, audio_input, override_profile, masking_strength, sliding_window_size, prompt_enhancer, negative_prompt
         )
     finally:
         try:
@@ -13272,7 +13272,7 @@ def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale
             release_generation_slot()
 
 
-def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None, sliding_window_size=None, prompt_enhancer=None):
+def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None, sliding_window_size=None, prompt_enhancer=None, negative_prompt=None):
     global transformer_type
     import gc
     import torch
@@ -13533,6 +13533,8 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
             pass
     if prompt_enhancer is not None:
         params['prompt_enhancer'] = str(prompt_enhancer).strip()
+    if negative_prompt is not None:
+        params['negative_prompt'] = str(negative_prompt).strip()
     params['model_type'] = model_type
     params['prompt'] = prompt
     if num_inference_steps is not None:
@@ -14007,6 +14009,8 @@ def create_ui():
             api_override_profile = gr.Number(label="override_profile")
             api_masking_strength = gr.Number(label="masking_strength")
             api_sliding_window_size = gr.Number(label="sliding_window_size")
+            api_prompt_enhancer = gr.Textbox(label="prompt_enhancer")
+            api_negative_prompt = gr.Textbox(label="negative_prompt")
 
             api_gen_btn = gr.Button("api_gen_btn")
             api_gen_btn.click(
@@ -14015,7 +14019,8 @@ def create_ui():
                     api_model_type, api_prompt, api_num_inference_steps, api_guidance_scale,
                     api_resolution, api_video_length, api_seed, api_image_mode,
                     api_denoising_strength, api_image_start, api_image_end,
-                    api_audio_input, api_override_profile, api_masking_strength, api_sliding_window_size
+                    api_audio_input, api_override_profile, api_masking_strength, api_sliding_window_size,
+                    api_prompt_enhancer, api_negative_prompt
                 ],
                 outputs=gr.File(),
                 api_name="wan2gp_generate"
