@@ -14,6 +14,13 @@ async function render() {
     process.exit(1);
   }
   
+  if (templateName === 'scrape') {
+    console.log(`[Playwright] Delegating 'scrape' command to scrape.js...`);
+    const { spawnSync } = require('child_process');
+    const result = spawnSync('node', [path.join(__dirname, 'scrape.js'), ...args], { stdio: 'inherit' });
+    process.exit(result.status !== null ? result.status : 1);
+  }
+  
   const propsPath = args[propsArgIndex + 1];
   let props = {};
   if (fs.existsSync(propsPath)) {
@@ -28,8 +35,7 @@ async function render() {
   const server = await createServer({
     root: __dirname,
     server: { port: 0, strictPort: false },
-    // Suppress logs for cleaner output
-    logLevel: 'error' 
+    logLevel: 'info' 
   });
   await server.listen();
   
@@ -43,6 +49,8 @@ async function render() {
   });
   
   const page = await context.newPage();
+  page.on('console', msg => console.log(`[Browser Console] ${msg.type()}: ${msg.text()}`));
+  page.on('pageerror', error => console.error(`[Browser Error] ${error.message}`));
   
   console.log(`[Playwright] Loading page...`);
   await page.goto(localUrl);
