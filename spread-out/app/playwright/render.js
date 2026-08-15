@@ -27,11 +27,14 @@ async function render() {
   console.log(`[Playwright] Starting Vite dev server...`);
   const server = await createServer({
     root: __dirname,
-    server: { port: 3000 },
+    server: { port: 0, strictPort: false },
     // Suppress logs for cleaner output
     logLevel: 'error' 
   });
   await server.listen();
+  
+  const localUrl = server.resolvedUrls.local[0];
+  console.log(`[Playwright] Dev server running at ${localUrl}`);
   
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -42,7 +45,7 @@ async function render() {
   const page = await context.newPage();
   
   console.log(`[Playwright] Loading page...`);
-  await page.goto('http://localhost:3000/');
+  await page.goto(localUrl);
   
   // Wait for React to mount and expose window.reactReady
   await page.waitForFunction(() => window.reactReady === true);
