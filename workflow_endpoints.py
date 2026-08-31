@@ -13,7 +13,7 @@ import hashlib
 import re
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Request, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from shared.ffmpeg_setup import download_ffmpeg
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
@@ -22,6 +22,11 @@ router = APIRouter()
 
 # Global dictionary to store execution status
 executions = {}
+
+def file_url(path: str) -> str:
+    """Format file path as a standard URL path with forward slashes."""
+    clean = str(path).replace("\\", "/").lstrip("/")
+    return f"/gradio_api/file={clean}"
 
 def get_npx_command():
     """Robustly find the npx command for the current platform."""
@@ -238,7 +243,7 @@ def render_video_task(data: Dict[str, Any], output_path: str, execution_id: str)
         final_cmd += ["-c:v", codec, "-r", str(fps), output_path]
         
         subprocess.run(final_cmd, check=True, capture_output=True)
-        executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
+        executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": file_url(output_path)}
         print(f"Render complete: {output_path}")
 
     except Exception as e:
@@ -264,7 +269,7 @@ async def render_video(request: Request, background_tasks: BackgroundTasks):
     return {
         "status": "queued",
         "execution_id": execution_id,
-        "output_url": f"/file={output_path}"
+        "output_url": file_url(output_path)
     }
 
 @router.get("/render_status/{execution_id}")
@@ -437,7 +442,7 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
         if process.returncode != 0:
             raise RuntimeError(f"Hyperframes render failed with exit code {process.returncode}")
             
-        executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
+        executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": file_url(output_path)}
         print(f"Hyperframes render complete: {output_path}")
 
     except Exception as e:
@@ -487,7 +492,7 @@ def hyperframes_tts_task(data: Dict[str, Any], output_path: str, execution_id: s
         if response.status_code == 200:
             with open(output_path, 'wb') as f:
                 f.write(response.content)
-            executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
+            executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": file_url(output_path)}
             print(f"[Hyperframes] TTS Complete: {output_path}")
         else:
             raise RuntimeError(f"Local TTS failed with status {response.status_code}: {response.text}")
@@ -541,8 +546,9 @@ def hyperframes_transcribe_task(data: Dict[str, Any], input_path: str, execution
         try: shutil.rmtree(temp_dir)
         except: pass
 
+@router.post("/render_hyperframes")
 @router.post("/hyperframes/render")
-async def hyperframes_render(request: Request, background_tasks: BackgroundTasks):
+async def render_hyperframes(request: Request, background_tasks: BackgroundTasks):
     try:
         data = await request.json()
     except Exception:
@@ -559,7 +565,7 @@ async def hyperframes_render(request: Request, background_tasks: BackgroundTasks
     return {
         "status": "queued",
         "execution_id": execution_id,
-        "output_url": f"/file={output_path}"
+        "output_url": file_url(output_path)
     }
 
 @router.post("/hyperframes/tts")
@@ -702,7 +708,7 @@ async def take_screenshot(request: Request):
             await asyncio.sleep(3)
             await page.screenshot(path=output_path, type="jpeg", quality=90)
             await browser.close()
-        return {"status": "completed", "output_path": output_path, "output_url": output_path}
+        return {"status": "completed", "output_path": output_path, "output_url": file_url(output_path)}
     except Exception as e:
         return JSONResponse({"status": "failed", "error": str(e)}, status_code=500)
 
@@ -791,7 +797,7 @@ def playwright_render_task(data: Dict[str, Any], output_path: str, execution_id:
         except:
             pass
             
-        executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
+        executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": file_url(output_path)}
         print(f"Playwright render complete: {output_path}")
             
     except Exception as e:
@@ -880,7 +886,7 @@ def playwright_still_task(data: Dict[str, Any], output_path: str, execution_id: 
         except:
             pass
             
-        executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}"}
+        executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": file_url(output_path)}
         print(f"Playwright still complete: {output_path}")
             
     except Exception as e:
@@ -897,7 +903,7 @@ async def playwright_render(request: Request, background_tasks: BackgroundTasks)
     os.makedirs("outputs", exist_ok=True)
     
     background_tasks.add_task(playwright_render_task, data, output_path, execution_id)
-    return {"status": "queued", "execution_id": execution_id, "output_url": f"/file={output_path}"}
+    return {"status": "queued", "execution_id": execution_id, "output_url": file_url(output_path)}
 
 @router.post("/playwright/render_still")
 async def playwright_render_still(request: Request, background_tasks: BackgroundTasks):
@@ -909,7 +915,22 @@ async def playwright_render_still(request: Request, background_tasks: Background
     os.makedirs("outputs", exist_ok=True)
     
     background_tasks.add_task(playwright_still_task, data, output_path, execution_id)
-    return {"status": "queued", "execution_id": execution_id, "output_url": f"/file={output_path}"}
+    return {"status": "queued", "execution_id": execution_id, "output_url": file_url(output_path)}
+
+@router.get("/file={file_path:path}")
+@router.head("/file={file_path:path}")
+async def serve_file_fallback(file_path: str):
+    """Serve files directly or redirect to Gradio 5's /gradio_api/file= route for backward compatibility."""
+    clean_path = file_path.replace("\\", "/").lstrip("/")
+    candidates = [
+        clean_path,
+        os.path.abspath(clean_path),
+        os.path.join(os.getcwd(), clean_path),
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return FileResponse(c)
+    return RedirectResponse(url=f"/gradio_api/file={clean_path}", status_code=307)
 
 def setup_workflow_endpoints(app):
     ensure_hyperframes_env()
