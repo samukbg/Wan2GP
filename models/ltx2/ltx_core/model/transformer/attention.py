@@ -273,6 +273,10 @@ class Attention(torch.nn.Module):
                 out.add_(x_pos)
                 x_pos = None
                 if self.to_gate_logits is not None:
+                    target_device = out.device if out is not None else (self.to_gate_logits.weight.device if hasattr(self.to_gate_logits, "weight") and self.to_gate_logits.weight is not None else None)
+                    target_dtype = self.to_gate_logits.weight.dtype if hasattr(self.to_gate_logits, "weight") and self.to_gate_logits.weight is not None else (out.dtype if out is not None else None)
+                    if target_device is not None and (gate_input.device != target_device or (target_dtype is not None and gate_input.dtype != target_dtype)):
+                        gate_input = gate_input.to(device=target_device, dtype=target_dtype)
                     gate_logits = self.to_gate_logits(gate_input)
                     gates = 2.0 * torch.sigmoid(gate_logits).to(dtype=out.dtype)
                     out.mul_(gates.unsqueeze(-1))
@@ -291,6 +295,10 @@ class Attention(torch.nn.Module):
             recycle_q= True,
         )
         if self.to_gate_logits is not None:
+            target_device = out.device if out is not None else (self.to_gate_logits.weight.device if hasattr(self.to_gate_logits, "weight") and self.to_gate_logits.weight is not None else None)
+            target_dtype = self.to_gate_logits.weight.dtype if hasattr(self.to_gate_logits, "weight") and self.to_gate_logits.weight is not None else (out.dtype if out is not None else None)
+            if target_device is not None and (gate_input.device != target_device or (target_dtype is not None and gate_input.dtype != target_dtype)):
+                gate_input = gate_input.to(device=target_device, dtype=target_dtype)
             gate_logits = self.to_gate_logits(gate_input)
             gates = 2.0 * torch.sigmoid(gate_logits).to(dtype=out.dtype)
             out.mul_(gates.unsqueeze(-1))

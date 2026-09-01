@@ -40,7 +40,7 @@
     "audio_output_codec": "aac_128",
     "audio_stand_alone_output_codec": "wav",
     "last_model_per_family": {
-        "ltx2": "ltx2_22B_distilled_1_1",
+        "ltx2": "ltx2_25_22B_distilled",
         "wan2_2": "i2v_2_2_Enhanced_Lightning_v2",
         "wan": "infinitetalk",
         "ltxv": "ltxv_13B",
@@ -72,9 +72,10 @@
         "ltx2_22B_msr": "ltx2_22B_msr",
         "ti2v_2_2": "ti2v_2_2_fastwan",
         "animate2": "animate2_distilled",
-        "i2v_2_2": "i2v_2_2_Enhanced_Lightning_v2"
+        "i2v_2_2": "i2v_2_2_Enhanced_Lightning_v2",
+        "ltx2_25_22B": "ltx2_25_22B_distilled"
     },
-    "last_model_type": "minimax_h3_ref2va_pruned",
+    "last_model_type": "ltx2_25_22B_distilled",
     "last_resolution_choice": "1088x832",
     "last_resolution_per_group": {
         "720p": "1088x832",

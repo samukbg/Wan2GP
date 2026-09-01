@@ -82,27 +82,33 @@ async function render() {
     fs.mkdirSync(outDir, { recursive: true });
   }
 
-  let server = null;
-  let localUrl = '';
-
-  // Try Vite first if available, otherwise use built-in zero-dependency static server
-  try {
-    const { createServer } = require('vite');
-    const viteServer = await createServer({
-      root: __dirname,
-      server: { port: 0, strictPort: false },
-      logLevel: 'warn'
-    });
-    await viteServer.listen();
-    server = viteServer;
-    localUrl = viteServer.resolvedUrls.local[0];
-    console.log(`[Playwright] Vite dev server running at ${localUrl}`);
-  } catch (viteErr) {
-    console.log(`[Playwright] Using built-in HTTP server (Vite not installed or skipped)`);
-    const staticSrv = await createStaticServer(__dirname);
+  // 1. Prefer pre-built production dist bundle first (instant 0ms startup, 100% reliable)
+  const distDir = path.join(__dirname, 'dist');
+  if (fs.existsSync(path.join(distDir, 'index.html'))) {
+    console.log(`[Playwright] Using pre-built dist bundle from ${distDir}`);
+    const staticSrv = await createStaticServer(distDir);
     server = staticSrv.server;
     localUrl = staticSrv.url;
-    console.log(`[Playwright] Built-in static server running at ${localUrl}`);
+  } else {
+    // 2. Fallback to Vite dev server if available
+    try {
+      const { createServer } = require('vite');
+      const viteServer = await createServer({
+        root: __dirname,
+        server: { port: 0, strictPort: false },
+        logLevel: 'warn'
+      });
+      await viteServer.listen();
+      server = viteServer;
+      localUrl = viteServer.resolvedUrls.local[0];
+      console.log(`[Playwright] Vite dev server running at ${localUrl}`);
+    } catch (viteErr) {
+      console.log(`[Playwright] Using built-in HTTP server (Vite not installed or skipped)`);
+      const staticSrv = await createStaticServer(__dirname);
+      server = staticSrv.server;
+      localUrl = staticSrv.url;
+      console.log(`[Playwright] Built-in static server running at ${localUrl}`);
+    }
   }
   
   const execPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || (fs.existsSync('/usr/bin/chromium-browser') ? '/usr/bin/chromium-browser' : (fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined));
