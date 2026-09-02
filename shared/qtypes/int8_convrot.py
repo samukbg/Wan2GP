@@ -44,13 +44,122 @@ def _normalize_compute_dtype(dtype):
     return torch.bfloat16
 
 
+def _patch_weight_qbytes_tensor():
+    if getattr(WeightQBytesTensor, "_wan2gp_patched", False):
+        return
+    orig_new = WeightQBytesTensor.__new__
+    orig_init = WeightQBytesTensor.__init__
+
+    @staticmethod
+    def _safe_weight_qbytes_new(cls, *args, **kwargs):
+        if len(args) == 1 and isinstance(args[0], torch.Tensor) and ("_qtype" in kwargs or "_data" in kwargs or "qtype" in kwargs):
+            t = args[0]
+            data = kwargs.pop("_data", getattr(t, "_data", None))
+            scale = kwargs.pop("_scale", getattr(t, "_scale", None))
+            requires_grad = kwargs.pop("requires_grad", t.requires_grad)
+            device = data.device if data is not None else t.device
+            dtype = scale.dtype if scale is not None else t.dtype
+            return torch.Tensor._make_wrapper_subclass(
+                cls, t.size(), strides=t.stride(), dtype=dtype, device=device, requires_grad=requires_grad
+            )
+        qtype = kwargs.pop("qtype", None) if "qtype" in kwargs else kwargs.pop("_qtype", None)
+        axis = kwargs.pop("axis", None) if "axis" in kwargs else kwargs.pop("_axis", None)
+        size = kwargs.pop("size", None) if "size" in kwargs else kwargs.pop("_size", None)
+        stride = kwargs.pop("stride", None) if "stride" in kwargs else kwargs.pop("_stride", None)
+        data = kwargs.pop("data", None) if "data" in kwargs else kwargs.pop("_data", None)
+        scale = kwargs.pop("scale", None) if "scale" in kwargs else kwargs.pop("_scale", None)
+        activation_qtype = kwargs.pop("activation_qtype", None) if "activation_qtype" in kwargs else kwargs.pop("_activation_qtype", None)
+        requires_grad = kwargs.pop("requires_grad", False)
+
+        if len(args) >= 1 and qtype is None: qtype = args[0]
+        if len(args) >= 2 and axis is None: axis = args[1]
+        if len(args) >= 3 and size is None: size = args[2]
+        if len(args) >= 4 and stride is None: stride = args[3]
+        if len(args) >= 5 and data is None: data = args[4]
+        if len(args) >= 6 and scale is None: scale = args[5]
+        if len(args) >= 7 and activation_qtype is None: activation_qtype = args[6]
+        if len(args) >= 8: requires_grad = args[7]
+
+        return orig_new(cls, qtype, axis, size, stride, data, scale, activation_qtype, requires_grad)
+
+    def _safe_weight_qbytes_init(self, *args, **kwargs):
+        if len(args) == 1 and isinstance(args[0], torch.Tensor) and ("_qtype" in kwargs or "_data" in kwargs or "qtype" in kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+            return
+        qtype = kwargs.pop("qtype", None) if "qtype" in kwargs else kwargs.pop("_qtype", None)
+        axis = kwargs.pop("axis", None) if "axis" in kwargs else kwargs.pop("_axis", None)
+        size = kwargs.pop("size", None) if "size" in kwargs else kwargs.pop("_size", None)
+        stride = kwargs.pop("stride", None) if "stride" in kwargs else kwargs.pop("_stride", None)
+        data = kwargs.pop("data", None) if "data" in kwargs else kwargs.pop("_data", None)
+        scale = kwargs.pop("scale", None) if "scale" in kwargs else kwargs.pop("_scale", None)
+        activation_qtype = kwargs.pop("activation_qtype", None) if "activation_qtype" in kwargs else kwargs.pop("_activation_qtype", None)
+        requires_grad = kwargs.pop("requires_grad", False)
+
+        if len(args) >= 1 and qtype is None: qtype = args[0]
+        if len(args) >= 2 and axis is None: axis = args[1]
+        if len(args) >= 3 and size is None: size = args[2]
+        if len(args) >= 4 and stride is None: stride = args[3]
+        if len(args) >= 5 and data is None: data = args[4]
+        if len(args) >= 6 and scale is None: scale = args[5]
+        if len(args) >= 7 and activation_qtype is None: activation_qtype = args[6]
+        if len(args) >= 8: requires_grad = args[7]
+
+        orig_init(self, qtype, axis, size, stride, data, scale, activation_qtype, requires_grad)
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    WeightQBytesTensor.__new__ = _safe_weight_qbytes_new
+    WeightQBytesTensor.__init__ = _safe_weight_qbytes_init
+    WeightQBytesTensor._wan2gp_patched = True
+
+_patch_weight_qbytes_tensor()
+
+
 class Int8ConvRotWeightTensor(WeightQBytesTensor):
     @staticmethod
     def create(qtype, axis, size, stride, data, scale, activation_qtype=None, requires_grad=False, compute_dtype=None):
         return Int8ConvRotWeightTensor(qtype, axis, size, stride, data, scale, activation_qtype, requires_grad, compute_dtype)
 
     @staticmethod
-    def __new__(cls, qtype, axis, size, stride, data, scale, activation_qtype=None, requires_grad=False, compute_dtype=None):
+    def __new__(cls, *args, **kwargs):
+        if len(args) == 1 and isinstance(args[0], torch.Tensor) and ("_qtype" in kwargs or "_data" in kwargs or "qtype" in kwargs):
+            t = args[0]
+            data = kwargs.pop("_data", getattr(t, "_data", None))
+            scale = kwargs.pop("_scale", getattr(t, "_scale", None))
+            compute_dtype = kwargs.pop("compute_dtype", None) or kwargs.pop("_compute_dtype", None)
+            requires_grad = kwargs.pop("requires_grad", t.requires_grad)
+            device = data.device if data is not None else t.device
+            dtype = _normalize_compute_dtype(compute_dtype or (scale.dtype if scale is not None else t.dtype))
+            return torch.Tensor._make_wrapper_subclass(
+                cls,
+                t.size(),
+                strides=t.stride(),
+                dtype=dtype,
+                device=device,
+                requires_grad=requires_grad,
+            )
+
+        qtype = kwargs.pop("qtype", None) if "qtype" in kwargs else kwargs.pop("_qtype", None)
+        axis = kwargs.pop("axis", None) if "axis" in kwargs else kwargs.pop("_axis", None)
+        size = kwargs.pop("size", None) if "size" in kwargs else kwargs.pop("_size", None)
+        stride = kwargs.pop("stride", None) if "stride" in kwargs else kwargs.pop("_stride", None)
+        data = kwargs.pop("data", None) if "data" in kwargs else kwargs.pop("_data", None)
+        scale = kwargs.pop("scale", None) if "scale" in kwargs else kwargs.pop("_scale", None)
+        activation_qtype = kwargs.pop("activation_qtype", None) if "activation_qtype" in kwargs else kwargs.pop("_activation_qtype", None)
+        requires_grad = kwargs.pop("requires_grad", False)
+        compute_dtype = kwargs.pop("compute_dtype", None) if "compute_dtype" in kwargs else kwargs.pop("_compute_dtype", None)
+
+        if len(args) >= 1 and qtype is None: qtype = args[0]
+        if len(args) >= 2 and axis is None: axis = args[1]
+        if len(args) >= 3 and size is None: size = args[2]
+        if len(args) >= 4 and stride is None: stride = args[3]
+        if len(args) >= 5 and data is None: data = args[4]
+        if len(args) >= 6 and scale is None: scale = args[5]
+        if len(args) >= 7 and activation_qtype is None: activation_qtype = args[6]
+        if len(args) >= 8: requires_grad = args[7]
+        if len(args) >= 9 and compute_dtype is None: compute_dtype = args[8]
+
         assert data.device == scale.device
         return torch.Tensor._make_wrapper_subclass(
             cls,
@@ -61,9 +170,38 @@ class Int8ConvRotWeightTensor(WeightQBytesTensor):
             requires_grad=requires_grad,
         )
 
-    def __init__(self, qtype, axis, size, stride, data, scale, activation_qtype=None, requires_grad=False, compute_dtype=None):
+    def __init__(self, *args, **kwargs):
+        if len(args) == 1 and isinstance(args[0], torch.Tensor) and ("_qtype" in kwargs or "_data" in kwargs or "qtype" in kwargs):
+            t = args[0]
+            self._compute_dtype = _normalize_compute_dtype(kwargs.pop("compute_dtype", None) or kwargs.pop("_compute_dtype", None) or getattr(t, "_compute_dtype", None))
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+            return
+
+        qtype = kwargs.pop("qtype", None) if "qtype" in kwargs else kwargs.pop("_qtype", None)
+        axis = kwargs.pop("axis", None) if "axis" in kwargs else kwargs.pop("_axis", None)
+        size = kwargs.pop("size", None) if "size" in kwargs else kwargs.pop("_size", None)
+        stride = kwargs.pop("stride", None) if "stride" in kwargs else kwargs.pop("_stride", None)
+        data = kwargs.pop("data", None) if "data" in kwargs else kwargs.pop("_data", None)
+        scale = kwargs.pop("scale", None) if "scale" in kwargs else kwargs.pop("_scale", None)
+        activation_qtype = kwargs.pop("activation_qtype", None) if "activation_qtype" in kwargs else kwargs.pop("_activation_qtype", None)
+        requires_grad = kwargs.pop("requires_grad", False)
+        compute_dtype = kwargs.pop("compute_dtype", None) if "compute_dtype" in kwargs else kwargs.pop("_compute_dtype", None)
+
+        if len(args) >= 1 and qtype is None: qtype = args[0]
+        if len(args) >= 2 and axis is None: axis = args[1]
+        if len(args) >= 3 and size is None: size = args[2]
+        if len(args) >= 4 and stride is None: stride = args[3]
+        if len(args) >= 5 and data is None: data = args[4]
+        if len(args) >= 6 and scale is None: scale = args[5]
+        if len(args) >= 7 and activation_qtype is None: activation_qtype = args[6]
+        if len(args) >= 8: requires_grad = args[7]
+        if len(args) >= 9 and compute_dtype is None: compute_dtype = args[8]
+
         super().__init__(qtype, axis, size, stride, data, scale, activation_qtype, requires_grad)
         self._compute_dtype = _normalize_compute_dtype(compute_dtype)
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
     def optimize(self):
         return self
