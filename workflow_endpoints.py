@@ -442,7 +442,6 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
             "--fps", str(fps),
             "--quality", quality,
             "--format", format,
-            "--quiet"
         ]
         
         print(f"[Hyperframes] Running: {' '.join(cmd)}")
@@ -450,27 +449,31 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
         custom_env = get_hyperframes_env()
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=use_shell, env=custom_env)
         
+        output_lines = []
         for line in process.stdout:
-            print(f"[Hyperframes] {line.strip()}")
+            stripped = line.strip()
+            if stripped:
+                print(f"[Hyperframes] {stripped}")
+                output_lines.append(stripped)
             if "[INFO] Compiled" in line:
                 executions[execution_id]["progress"] = 40
             
         process.wait()
         
         if process.returncode != 0:
-            raise RuntimeError(f"Hyperframes render failed with exit code {process.returncode}")
+            error_details = "\n".join(output_lines[-10:])
+            raise RuntimeError(f"Hyperframes render failed with exit code {process.returncode}\n{error_details}\nFailed project preserved at: {temp_dir}")
             
         executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": file_url(output_path)}
         print(f"Hyperframes render complete: {output_path}")
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception:
+            pass
 
     except Exception as e:
         print(f"Hyperframes render failed: {e}")
         executions[execution_id] = {"status": "failed", "error": str(e)}
-    finally:
-        try:
-            shutil.rmtree(temp_dir)
-        except:
-            pass
 
 def hyperframes_tts_task(data: Dict[str, Any], output_path: str, execution_id: str):
     executions[execution_id] = {"status": "processing", "progress": 0}
