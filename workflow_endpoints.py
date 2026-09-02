@@ -298,10 +298,42 @@ def get_render_status(execution_id: str):
     return status
 
 def _preprocess_hyperframes_html(html: str, dest_dir: str) -> str:
-    """Scan HTML for external media URLs, download them locally, and replace the URLs with local paths.
-    If a download fails (e.g. 404/410), skip the media URL by clearing it to prevent broken network requests."""
+    """Scan HTML for external media URLs and inline Base64 data URIs, save them locally as files,
+    and replace with local paths to prevent huge AST payloads and 'Maximum call stack size exceeded' errors."""
     if not html:
         return html
+
+    import base64
+    def _extract_base64(match):
+        mime = match.group(1).lower()
+        b64data = match.group(2)
+        ext = '.bin'
+        if 'png' in mime: ext = '.png'
+        elif 'jpeg' in mime or 'jpg' in mime: ext = '.jpg'
+        elif 'gif' in mime: ext = '.gif'
+        elif 'webp' in mime: ext = '.webp'
+        elif 'svg' in mime: ext = '.svg'
+        elif 'mp3' in mime or 'mpeg' in mime: ext = '.mp3'
+        elif 'wav' in mime: ext = '.wav'
+        elif 'mp4' in mime: ext = '.mp4'
+        elif 'webm' in mime: ext = '.webm'
+        elif 'ogg' in mime: ext = '.ogg'
+        
+        asset_hash = hashlib.md5(b64data[:100].encode() + str(len(b64data)).encode()).hexdigest()[:8]
+        filename = f"inline_asset_{asset_hash}{ext}"
+        filepath = os.path.join(dest_dir, filename)
+        try:
+            with open(filepath, "wb") as f_out:
+                f_out.write(base64.b64decode(b64data))
+            print(f"[Hyperframes] Extracted inline base64 {mime} ({len(b64data)} chars) -> {filename}")
+            return f"./{filename}"
+        except Exception as e:
+            print(f"[Hyperframes] Warning: Failed to decode base64 asset: {e}")
+            return match.group(0)
+
+    # Extract all inline data URLs (images, audio, video) to avoid multi-megabyte attribute strings
+    html = re.sub(r'data:([^;]+);base64,([A-Za-z0-9+/=]+)', _extract_base64, html)
+
     # Support URLs with escaped slashes like https:\/\/...
     urls = re.findall(r'https?(?::|\\:)(?:/|\\/){2}[^\s"\'<>]+?(?:\.mp4|\.webm|\.mp3|\.wav)[^\s"\'<>]*', html)
     unique_urls = list(set(urls))
