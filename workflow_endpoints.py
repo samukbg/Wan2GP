@@ -45,6 +45,14 @@ def get_npx_command():
 def get_hyperframes_env() -> Dict[str, str]:
     env = os.environ.copy()
     env["HF_VIDEO_COVERAGE_THRESHOLD"] = "0"
+    
+    # Increase V8 call stack size and heap limit for Node.js to handle complex/deep component trees
+    node_opts = env.get("NODE_OPTIONS", "")
+    additional_opts = "--stack-size=8192 --max-old-space-size=8192"
+    if "--stack-size" not in node_opts:
+        node_opts = f"{node_opts} {additional_opts}".strip()
+        env["NODE_OPTIONS"] = node_opts
+
     if "PRODUCER_HEADLESS_SHELL_PATH" not in env:
         candidates = [
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
