@@ -54,12 +54,22 @@ def get_hyperframes_env() -> Dict[str, str]:
         env["NODE_OPTIONS"] = node_opts
 
     if "PRODUCER_HEADLESS_SHELL_PATH" not in env:
-        candidates = [
+        candidates = []
+        # Check hyperframes cached chrome-headless-shell binaries first
+        try:
+            import glob
+            cached_shells = sorted(glob.glob(os.path.expanduser(r"~/.cache/hyperframes/chrome/**/chrome-headless-shell.exe"), recursive=True))
+            if cached_shells:
+                candidates.append(cached_shells[-1])
+        except Exception:
+            pass
+
+        candidates.extend([
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
             r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
             r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
             r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-        ]
+        ])
         for candidate in candidates:
             if os.path.exists(candidate):
                 env["PRODUCER_HEADLESS_SHELL_PATH"] = candidate
