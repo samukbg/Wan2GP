@@ -7841,7 +7841,7 @@ def generate_media(
                     if pre_video_guide is not None and pre_video_guide.dtype == torch.uint8:
                         pre_video_guide =  pre_video_guide.float().div_(127.5).sub_(1.0)
                     window_overlap_frames = source_video_overlap_frames_count if window_no == 1 else reuse_frames
-                    trim_first_frames = min(sliding_window_trim_first_frames, max(0, sample.shape[1] - 1)) if window_overlap_frames == 0 else 0
+                    trim_first_frames = min(sliding_window_trim_first_frames or 0, max(0, sample.shape[1] - 1)) if window_overlap_frames == 0 else 0
                     if trim_first_frames > 0:
                         audio_trim_start_frame = frames_already_processed_count + (prefix_video.shape[1] if prefix_video is not None and window_no == 1 else 0)
                         external_audio_trim_ranges.append((audio_trim_start_frame, trim_first_frames))
@@ -13654,6 +13654,9 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
         'min_frames_if_references': 1,
         "pace": 0.5,
         "exaggeration": 0.5,
+        "sliding_window_trim_first_frames": 0,
+        "sub_parallel_window_size": 0,
+        "sub_parallel_window_overlap": 0,
         "output_filename": ""
     }
     for key, value in defaults.items():
