@@ -138,6 +138,8 @@ import requests
 from shared.gradio.gallery import AdvancedMediaGallery, get_gradio_file_path
 from shared.gradio.hierarchy_selector import HierarchySelector, build_choices_hierarchy
 from workflow_endpoints import setup_workflow_endpoints
+from starlette.middleware import Middleware
+from shared.ephemeral_cleanup import register_ephemeral_file, EphemeralCleanupMiddleware
 from shared.deepy.config import get_deepy_default_runtime_config, set_deepy_runtime_config
 from shared.deepy import controller as deepy_controller
 from shared.deepy import cli as deepy_cli
@@ -13738,18 +13740,7 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
         error_msg = captured_error[0] or f"Generation produced no output file at '{result_path}'."
         raise gr.Error(error_msg)
 
-    def delayed_delete(path, delay=300):
-        import time
-        time.sleep(delay)
-        try:
-            if os.path.exists(path):
-                os.remove(path)
-                print(f"Cleaned up API output: {path}")
-        except Exception as e:
-            print(f"Error deleting {path}: {e}")
-
-    import threading
-    threading.Thread(target=delayed_delete, args=(result_path,), daemon=True).start()
+    register_ephemeral_file(result_path)
     return result_path
 
 def motion_api_handler(description):
@@ -14419,7 +14410,8 @@ if __name__ == "__main__":
         server_port=server_port,
         share=args.share,
         allowed_paths=list({save_path, image_save_path, audio_save_path, "icons", "outputs", os.path.abspath("outputs")}),
-        prevent_thread_lock=True
+        prevent_thread_lock=True,
+        app_kwargs={"middleware": [Middleware(EphemeralCleanupMiddleware)]}
     )
 
     # Mount custom workflow endpoints

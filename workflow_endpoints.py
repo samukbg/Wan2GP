@@ -16,6 +16,7 @@ from fastapi import APIRouter, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from shared.ffmpeg_setup import download_ffmpeg
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+from shared.ephemeral_cleanup import register_ephemeral_file, ephemeral_manager, EphemeralCleanupMiddleware
 
 
 router = APIRouter()
@@ -261,6 +262,7 @@ def render_video_task(data: Dict[str, Any], output_path: str, execution_id: str)
         final_cmd += ["-c:v", codec, "-r", str(fps), output_path]
         
         subprocess.run(final_cmd, check=True, capture_output=True)
+        register_ephemeral_file(output_path)
         executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": file_url(output_path)}
         print(f"Render complete: {output_path}")
 
@@ -496,6 +498,7 @@ def render_hyperframes_task(data: Dict[str, Any], output_path: str, execution_id
             error_details = "\n".join(output_lines[-10:])
             raise RuntimeError(f"Hyperframes render failed with exit code {process.returncode}\n{error_details}\nFailed project preserved at: {temp_dir}")
             
+        register_ephemeral_file(output_path)
         executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": file_url(output_path)}
         print(f"Hyperframes render complete: {output_path}")
         try:
@@ -545,6 +548,7 @@ def hyperframes_tts_task(data: Dict[str, Any], output_path: str, execution_id: s
         if response.status_code == 200:
             with open(output_path, 'wb') as f:
                 f.write(response.content)
+            register_ephemeral_file(output_path)
             executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": file_url(output_path)}
             print(f"[Hyperframes] TTS Complete: {output_path}")
         else:
@@ -734,6 +738,7 @@ async def record_website(payload):
             os.remove(video_path)
         else:
             os.rename(video_path, output_path)
+        register_ephemeral_file(output_path)
         return {"status": "completed", "output_url": output_path}
 
 @router.post("/take_screenshot")
@@ -761,6 +766,7 @@ async def take_screenshot(request: Request):
             await asyncio.sleep(3)
             await page.screenshot(path=output_path, type="jpeg", quality=90)
             await browser.close()
+        register_ephemeral_file(output_path)
         return {"status": "completed", "output_path": output_path, "output_url": file_url(output_path)}
     except Exception as e:
         return JSONResponse({"status": "failed", "error": str(e)}, status_code=500)
@@ -850,6 +856,7 @@ def playwright_render_task(data: Dict[str, Any], output_path: str, execution_id:
         except:
             pass
             
+        register_ephemeral_file(output_path)
         executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": file_url(output_path)}
         print(f"Playwright render complete: {output_path}")
             
@@ -939,6 +946,7 @@ def playwright_still_task(data: Dict[str, Any], output_path: str, execution_id: 
         except:
             pass
             
+        register_ephemeral_file(output_path)
         executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": file_url(output_path)}
         print(f"Playwright still complete: {output_path}")
             
@@ -985,6 +993,25 @@ async def serve_file_fallback(file_path: str):
             return FileResponse(c)
     return RedirectResponse(url=f"/gradio_api/file={clean_path}", status_code=307)
 
+@router.post("/api/cleanup_file")
+@router.delete("/api/cleanup_file")
+async def api_cleanup_file(request: Request):
+    """Allows remote clients to explicitly trigger immediate file cleanup after downloading."""
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    file_path = data.get("file_path") or data.get("path") or request.query_params.get("path") or request.query_params.get("file_path")
+    if not file_path:
+        return JSONResponse({"error": "Missing 'file_path' parameter"}, status_code=400)
+    success = ephemeral_manager.manual_delete(file_path)
+    return {"status": "success" if success else "not_found", "file_path": file_path}
+
 def setup_workflow_endpoints(app):
     ensure_hyperframes_env()
     app.include_router(router)
+    # Ensure ephemeral cleanup middleware is active even if not passed via app_kwargs
+    if hasattr(app, "middleware_stack") and app.middleware_stack is not None:
+        if not getattr(app, "_ephemeral_mw_wrapped", False):
+            app.middleware_stack = EphemeralCleanupMiddleware(app.middleware_stack)
+            app._ephemeral_mw_wrapped = True
