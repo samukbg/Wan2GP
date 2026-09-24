@@ -6693,7 +6693,7 @@ def enhance_prompt(state, prompt, alt_prompt, prompt_enhancer, multi_images_gen_
         image_start = [next((image for image, label in zip(context.images, context.labels) if label in ("start image", "end image")), None) for context in image_contexts]
     original_image_refs = inputs["image_refs"] if "I" in video_prompt_type else None
     if original_image_refs is not None:
-        original_image_refs = [ convert_image(tup[0]) for tup in original_image_refs ]        
+        original_image_refs = [ convert_image(tup[0] if isinstance(tup, (tuple, list)) else tup) for tup in original_image_refs ]        
     is_image = inputs["image_mode"] > 0
     seed = inputs["seed"]
 
@@ -13953,23 +13953,62 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
             return extract_gradio_path(inp[0])
         return None
 
+    import os
+    from PIL import Image
+
+    model_def = get_model_def(model_type) or {}
+    base_model_type = get_base_model_type(model_type)
+    is_ref_image_model = bool(model_def.get("image_outputs", False)) or bool(image_mode) or (
+        base_model_type and any(str(base_model_type).lower().startswith(p) for p in (
+            "flux2", "pi_flux2", "flux", "qwen", "sensenova", "ming", "z_image", "ideogram", "krea", "hidream"
+        ))
+    )
+
+    def _normalize_image_key(val):
+        if val is None:
+            return None
+        if isinstance(val, str):
+            val_clean = val.strip()
+            if os.path.exists(val_clean):
+                return os.path.abspath(val_clean).lower()
+            return val_clean.lower()
+        if isinstance(val, dict) and 'path' in val:
+            return _normalize_image_key(val['path'])
+        return None
+
+    AUDIO_EXTS = ('.wav', '.mp3', '.ogg', '.flac', '.aac', '.m4a', '.wma', '.opus', '.aiff', '.alac')
+    IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tif')
+
+    audio_image_path = None
     actual_audio_input = extract_gradio_path(audio_input)
     if actual_audio_input is not None:
         actual_audio_input = download_url_to_temp(actual_audio_input)
     
-    import os
-    if actual_audio_input and os.path.isfile(actual_audio_input) and os.path.getsize(actual_audio_input) > 44:
-        params['audio_source'] = actual_audio_input
-        params['audio_prompt_type'] = 'A'
-    else:
-        pass
+    if actual_audio_input and os.path.isfile(actual_audio_input) and os.path.getsize(actual_audio_input) > 0:
+        ext = os.path.splitext(actual_audio_input)[1].lower()
+        if ext in AUDIO_EXTS:
+            if not is_ref_image_model:
+                params['audio_source'] = actual_audio_input
+                params['audio_prompt_type'] = 'A'
+        elif ext in IMAGE_EXTS:
+            audio_image_path = actual_audio_input
+        else:
+            try:
+                with Image.open(actual_audio_input) as img_probe:
+                    img_probe.verify()
+                audio_image_path = actual_audio_input
+            except Exception:
+                if not is_ref_image_model and os.path.getsize(actual_audio_input) > 44:
+                    params['audio_source'] = actual_audio_input
+                    params['audio_prompt_type'] = 'A'
 
     actual_image_end = None
+    image_end_path = None
     if image_end:
-        from PIL import Image
         path = extract_gradio_path(image_end)
         if path and isinstance(path, str):
             path = download_url_to_temp(path)
+            image_end_path = path
         if path and isinstance(path, str):
             try:
                 actual_image_end = Image.open(path).convert("RGB")
@@ -13978,7 +14017,7 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
         elif isinstance(image_end, Image.Image):
             actual_image_end = image_end
             
-        if actual_image_end and resolution:
+        if actual_image_end and resolution and not is_ref_image_model:
             try:
                 width, height = map(int, resolution.split('x'))
                 if actual_image_end.size != (width, height):
@@ -13987,10 +14026,10 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
             except Exception as e:
                 print(f"Failed to resize image_end: {e}")
 
-    processed_image_start = None
-    processed_image_refs = None
+    temp_image_refs = []
+    seen_image_keys = set()
+
     if image_start:
-        from PIL import Image
         if isinstance(image_start, str):
             image_start_strip = image_start.strip()
             if (image_start_strip.startswith('[') and image_start_strip.endswith(']')) or (image_start_strip.startswith('{') and image_start_strip.endswith('}')):
@@ -14010,7 +14049,6 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
         else:
             input_images_list = [image_start]
 
-        temp_image_refs = []
         for img_data in input_images_list:
             if img_data is None: continue
             
@@ -14018,34 +14056,55 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
             if path and isinstance(path, str):
                 path = download_url_to_temp(path)
             if path and isinstance(path, str):
+                norm_k = _normalize_image_key(path)
+                if norm_k and norm_k in seen_image_keys:
+                    continue
                 try:
-                    temp_image_refs.append(Image.open(path).convert("RGB"))
+                    loaded = Image.open(path).convert("RGB")
+                    temp_image_refs.append(loaded)
+                    if norm_k: seen_image_keys.add(norm_k)
                 except Exception as e:
                     print(f"Failed to load image from path: {e}")
             elif isinstance(img_data, Image.Image):
                 temp_image_refs.append(img_data)
-        
-        if len(temp_image_refs) > 0:
-            base_model_type = get_base_model_type(model_type)
-            is_flux = base_model_type and (base_model_type.startswith("flux2") or base_model_type == "pi_flux2")
-            if is_flux:
-                processed_image_start = None
-                processed_image_refs = temp_image_refs
-            else:
-                processed_image_start = temp_image_refs[0]
-                processed_image_refs = temp_image_refs[1:] if len(temp_image_refs) > 1 else None
-        else:
-            processed_image_start = None
-            processed_image_refs = None
-        
-        if resolution and isinstance(processed_image_start, Image.Image):
+
+    if audio_image_path and is_ref_image_model:
+        norm_audio_k = _normalize_image_key(audio_image_path)
+        if not norm_audio_k or norm_audio_k not in seen_image_keys:
             try:
-                width, height = map(int, resolution.split('x'))
-                if processed_image_start.size != (width, height):
-                    print(f"Resizing image_start from {processed_image_start.size} to ({width}, {height})")
-                    processed_image_start = processed_image_start.resize((width, height), Image.LANCZOS)
+                loaded_audio_img = Image.open(audio_image_path).convert("RGB")
+                temp_image_refs.append(loaded_audio_img)
+                if norm_audio_k: seen_image_keys.add(norm_audio_k)
+                print(f"[API] Added identity/reference image from audio_input: {audio_image_path}")
             except Exception as e:
-                print(f"Failed to resize image_start: {e}")
+                print(f"[API] Failed to load image from audio_input: {e}")
+
+    if actual_image_end and is_ref_image_model:
+        norm_end_k = _normalize_image_key(image_end_path)
+        if not norm_end_k or norm_end_k not in seen_image_keys:
+            temp_image_refs.append(actual_image_end)
+            if norm_end_k: seen_image_keys.add(norm_end_k)
+            print(f"[API] Added reference image from image_end for image model")
+        actual_image_end = None
+
+    processed_image_start = None
+    processed_image_refs = None
+    if len(temp_image_refs) > 0:
+        if is_ref_image_model:
+            processed_image_start = None
+            processed_image_refs = temp_image_refs
+        else:
+            processed_image_start = temp_image_refs[0]
+            processed_image_refs = temp_image_refs[1:] if len(temp_image_refs) > 1 else None
+            
+            if resolution and isinstance(processed_image_start, Image.Image):
+                try:
+                    width, height = map(int, resolution.split('x'))
+                    if processed_image_start.size != (width, height):
+                        print(f"Resizing image_start from {processed_image_start.size} to ({width}, {height})")
+                        processed_image_start = processed_image_start.resize((width, height), Image.LANCZOS)
+                except Exception as e:
+                    print(f"Failed to resize image_start: {e}")
 
     state = {
         "gen": {
@@ -14076,12 +14135,28 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
         params['image_start'] = processed_image_start
         params['image_prompt_type'] = "S"
         params['input_video_strength'] = 1.0
+    else:
+        params['image_start'] = None
+        params['image_prompt_type'] = ""
+
+    if actual_image_end:
+        params['image_end'] = actual_image_end
+        current_vpt = params.get('video_prompt_type', '') or ''
+        if "E" not in current_vpt:
+            params['video_prompt_type'] = current_vpt + "E"
+    else:
+        params['image_end'] = None
+
     if processed_image_refs:
         params['image_refs'] = processed_image_refs
-        base_model_type = get_base_model_type(model_type)
-        flag = 'KI' if base_model_type and (base_model_type.startswith("flux2") or base_model_type == "pi_flux2") else 'I'
-        if flag not in params.get('video_prompt_type', ''):
-            params['video_prompt_type'] = params.get('video_prompt_type', '') + flag
+        flag = 'KI' if ('K' in str(prompt_enhancer or '') or (base_model_type and any(str(base_model_type).lower().startswith(p) for p in ("flux", "pi_flux", "qwen")))) else 'I'
+        current_vpt = params.get('video_prompt_type', '') or ''
+        for ch in flag:
+            if ch not in current_vpt:
+                current_vpt += ch
+        params['video_prompt_type'] = current_vpt
+    else:
+        params['image_refs'] = None
 
     try:
         if override_profile is not None:
