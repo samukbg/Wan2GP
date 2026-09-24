@@ -14187,12 +14187,36 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
         params['prompt_enhancer'] = str(prompt_enhancer).strip()
     if negative_prompt is not None:
         params['negative_prompt'] = str(negative_prompt).strip()
+
+    # Adapt prompt references for Qwen models (which expect <image1>, <image2>, etc.)
+    if base_model_type and base_model_type.startswith("qwen") and isinstance(prompt, str):
+        import re
+        has_bracket_tags = bool(re.search(r'<image\d+>', prompt, re.IGNORECASE))
+        if not has_bracket_tags:
+            if re.search(r'\bimage[_\s#-]*0\b', prompt, re.IGNORECASE):
+                # 0-indexed: Image 0 -> <image1>, Image 1 -> <image2>, etc.
+                def _rep0(m): return f"<image{int(m.group(1)) + 1}>"
+                prompt = re.sub(r'\bimage[_\s#-]*(\d+)\b', _rep0, prompt, flags=re.IGNORECASE)
+            elif re.search(r'\bimage[_\s#-]*[1-9]\b', prompt, re.IGNORECASE):
+                # 1-indexed without brackets: Image 1 -> <image1>, Image 2 -> <image2>, etc.
+                def _rep1(m): return f"<image{int(m.group(1))}>"
+                prompt = re.sub(r'\bimage[_\s#-]*(\d+)\b', _rep1, prompt, flags=re.IGNORECASE)
+
     params['model_type'] = model_type
     params['prompt'] = prompt
     if num_inference_steps is not None:
         params['num_inference_steps'] = num_inference_steps
     if guidance_scale is not None:
-        params['guidance_scale'] = guidance_scale
+        try:
+            _gs = float(str(guidance_scale).strip())
+            # For Qwen 2.1 base model, guidance <= 1.0 disables CFG and negative prompts.
+            # Promote guidance 1.0 (typical Flux carry-over) to 4.0 so instructions are followed.
+            if base_model_type and base_model_type.startswith("qwen") and _gs <= 1.0:
+                print(f"[API] Adapting guidance_scale for Qwen 2.1 from {_gs} to 4.0 to enable CFG")
+                _gs = 4.0
+            params['guidance_scale'] = _gs
+        except Exception:
+            params['guidance_scale'] = guidance_scale
     if resolution is not None:
         params['resolution'] = resolution
     if video_length is not None:
