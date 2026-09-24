@@ -36,7 +36,9 @@ def run_test(server_url=SERVER_URL, product_img=None, user_img=None):
 
     prompt = (
         "HIGH-FIDELITY VIRTUAL TRY-ON — Image 0=GARMENT, Image 1=PERSON — "
-        "perform an exact 1:1 identity transfer from Image 1; accurately drape Image 0 onto subject; "
+        "In Image 0, replace only the face and head with the exact facial features, smile, and curly hair of the woman in Image 1. "
+        "The subject must wear the complete outfit from Image 0 exactly as shown from top to bottom, including the strapless feather bodice and matching trousers. "
+        "Do not include any clothing, white sweater, or blouse from Image 1. "
         "FULL-BODY luxury commercial fashion photography, cinematic studio lighting, photorealistic."
     )
 

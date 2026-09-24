@@ -14202,6 +14202,16 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
                 def _rep1(m): return f"<image{int(m.group(1))}>"
                 prompt = re.sub(r'\bimage[_\s#-]*(\d+)\b', _rep1, prompt, flags=re.IGNORECASE)
 
+        # Enhance virtual try-on phrasing for Qwen 2.1 to prevent clothing bleed/leak from the identity image
+        if "virtual try-on" in prompt.lower() and ("identity transfer" in prompt.lower() or "drape" in prompt.lower()):
+            if "<image1>" in prompt and "<image2>" in prompt:
+                prompt = re.sub(
+                    r'(?:perform\s+an\s+exact\s+1:1\s+identity\s+transfer\s+from\s+<image2>.*?drape\s+<image1>\s+onto\s+subject;?)',
+                    'In <image1>, replace only the face and head with the exact facial identity, features, and hair of the person in <image2>. The subject must wear the complete clothing outfit from <image1> exactly as shown from top to bottom. Completely remove and discard any clothing, tops, sweaters, shirts, or blouses from <image2>;',
+                    prompt,
+                    flags=re.IGNORECASE
+                )
+
     params['model_type'] = model_type
     params['prompt'] = prompt
     if num_inference_steps is not None:
