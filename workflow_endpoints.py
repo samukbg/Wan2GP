@@ -1009,7 +1009,9 @@ async def api_cleanup_file(request: Request):
 
 def setup_workflow_endpoints(app):
     ensure_hyperframes_env()
-    app.include_router(router)
+    if not getattr(app, "_workflow_endpoints_mounted", False):
+        app.include_router(router)
+        app._workflow_endpoints_mounted = True
     # Ensure ephemeral cleanup middleware is active even if not passed via app_kwargs
     if hasattr(app, "middleware_stack") and app.middleware_stack is not None:
         if not getattr(app, "_ephemeral_mw_wrapped", False):

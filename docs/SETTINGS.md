@@ -2,6 +2,8 @@
 
 WanGP generation settings are JSON-serializable values consumed by `wgp.py` and by the Python API in `shared/api.py`.
 
+Topics: [model selection](#model-selection), [prompts](#prompt-settings), [output dimensions and duration](#output-shape), [sampling](#core-sampling), [guidance](#guidance), [image and video inputs](#image-and-video-inputs), [audio inputs](#audio-inputs), [acceleration and caching](#acceleration-and-cache), [audio post-processing](#post-processing-audio), [advanced sampling](#advanced-sampling), [sliding windows](#sliding-window), [LoRAs](#loras), and [flag settings](#flag-settings).
+
 The baseline schema lives in `models/_settings.json`. Model defaults in `defaults/*.json` and `finetunes/*.json` override those values, then handler code can update or hide settings according to the selected model definition. In practice, an exported settings file is the safest template for a specific model.
 
 ## Model Selection
@@ -29,10 +31,10 @@ The baseline schema lives in `models/_settings.json`. Model defaults in `default
 
 | Setting | Type | Meaning |
 | --- | --- | --- |
-| `image_mode` | integer | `0` for video/audio-generation mode, `1` for image mode, `2` for image inpainting mode. The available tabs depend on `image_outputs`, `v2i_switch_supported`, and `inpaint_support` in the model definition. |
+| `image_mode` | integer | `0` for video/audio-generation mode, `1` for image mode, `2` for image inpainting mode. The available tabs depend on `image_outputs`, `v2i_switch_supported`, and `inpaint_support` in the model definition. Deepy omits a fixed normal-image value from image-only model defaults, templates, and profiles; mode `2` remains explicit. |
 | `resolution` | string | Output size as `WIDTHxHEIGHT`, for example `1280x720`. |
 | `batch_size` | integer | Number of images for image-output models. For some special image models this may have model-specific meaning. Video and audio paths usually force one sample per repeat. |
-| `video_length` | integer | Requested output frames. For audio-only models this is usually `0`; duration may come from `duration_seconds`. |
+| `video_length` | integer or seconds string | Requested output frames. Settings files, queue imports, and API/MCP requests may use a value such as `"10s"`; WanGP converts it using numeric `force_fps` when supplied, otherwise the model FPS, then selects the nearest frame count valid for the model. For audio-only models this is usually `0`; duration may come from `duration_seconds`. |
 | `duration_seconds` | number | Requested duration for audio models or models exposing `duration_slider`. |
 | `pause_seconds` | number | Pause inserted between multi-speaker or multi-sentence audio segments when supported. |
 | `force_fps` | string | Output FPS policy. Empty uses the model default. Accepts `auto`, `control`, `source`, or a numeric string such as `24`. |
@@ -76,12 +78,12 @@ The baseline schema lives in `models/_settings.json`. Model defaults in `default
 | Setting | Type | Meaning |
 | --- | --- | --- |
 | `image_prompt_type` | string flags | Start/end/source continuation mode. See flag details below. |
-| `image_start` | image or list | Start image(s) for image-to-video or image-conditioned generation. |
-| `image_end` | image or list | End image(s) when the model supports end frames. |
-| `image_refs` | image or list | Reference images selected by `video_prompt_type` flags such as `I`, `K`, `F`, or `J`. |
+| `image_start` | image or list | Start image(s) for image-to-video or image-conditioned generation. MCP accepts Gallery media IDs or authorized paths, including returned output paths. |
+| `image_end` | image or list | End image(s) when the model supports end frames. MCP accepts Gallery media IDs or authorized paths; sliding-window anchors are an ordered list, one per window. |
+| `image_refs` | image or list | Reference images or frames to inject, according to the model's declared mode; MCP accepts a list of Gallery media IDs or authorized paths. Use the complete model/template `video_prompt_type` choice, such as `KI` for references or `KFI` with `frames_positions` for frame injection. These are separate capabilities: H3 FL2VA supports frame injection, while H3 REF2VA supports general references. |
 | `image_refs_relative_size` | integer | Relative internal size for reference images on models exposing `any_image_refs_relative_size`. |
 | `remove_background_images_ref` | integer | Background-removal mode for reference images. Usually `0` off, `1` auto/on, with older values migrated by `fix_settings`. |
-| `frames_positions` | string | Positions for `F` positioned-frame references. Syntax is model-specific but usually frame indexes or ranges. |
+| `frames_positions` | string | Comma-separated frame positions: `1` = first frame, `L` = window end, `X` = skip a window without consuming an image. Repeat `X` to skip multiple windows. `L,L,X,L,L` uses four images at the ends of windows 1, 2, 4, and 5. |
 | `image_guide` | image | Control image used in image mode. WanGP maps this into `video_guide` internally for generation. |
 | `image_mask` | image | Image mask used in image inpainting/control modes. |
 | `video_source` | video | Source video for continuation (`image_prompt_type` `V`) or post-processing edit tasks. |
@@ -118,12 +120,12 @@ The baseline schema lives in `models/_settings.json`. Model defaults in `default
 | `skip_steps_cache_type` | string | Step-skipping cache type. Empty disables. Known values are `tea` and `mag` when the model exposes TeaCache or MagCache. |
 | `skip_steps_multiplier` | number | Cache speed/skip multiplier. The meaning is model/cache dependent. |
 | `skip_steps_start_step_perc` | integer | Percentage of denoising steps before cache skipping starts. |
-| `temporal_upsampling` | string | Combined temporal post-processing method and multiplier. Built-in values include `rife2` and `rife4`; plugins may register more temporal upsamplers. |
-| `spatial_upsampling` | string | Spatial post-processing mode. Empty disables; values include `vae1`, `vae2`, `lanczos<scale>`, and registered edit upsamplers such as FlashVSR. |
+| `temporal_upsampling` | string | Temporal post-processing method and multiplier encoded as `<method>*<multiplier>`, for example `rife*2` or `dlssg*4`. The former concatenated format remains accepted when loading older settings. |
+| `spatial_upsampling` | string | Spatial post-processing method and multiplier encoded as `<method>*<multiplier>`, for example `vae*2`, `lanczos*2`, or `dlss5*1`. Empty disables; refiners without a multiplier retain their bare method id. The former concatenated format remains accepted when loading older settings. |
 | `film_grain_intensity` | number | Film grain amount. `0` disables. |
 | `film_grain_saturation` | number | Saturation of generated film grain. |
 | `RIFLEx_setting` | integer | RIFLEx long-video policy. `0` auto, `1` always on, `2` always off. |
-| `override_profile` | number | Per-task MMGP profile override. `-1` uses the normal selected profile. |
+| `override_profile` | number | Per-task MMGP memory/offload profile override. Allowed values are `-1`, `1`, `2`, `3`, `3.5`, `4`, `4.5`, and `5`; `-1` uses the normal Video, Image, or Audio memory profile selected in WanGP configuration. This controls RAM/VRAM placement and speed only. It is not a saved settings/accelerator profile and does not accept a `setting_id`. |
 | `override_attention` | string | Per-task attention backend override. Empty uses global auto/default selection. |
 
 ## Post-Processing Audio
@@ -187,7 +189,7 @@ WanGP stores several UI selections as compact strings of letters. These are not 
 | empty | Text-only/new generation. |
 | `S` | Use `image_start` as starting image(s). |
 | `E` | Use `image_end` as end image(s), if the selected source mode supports end frames. |
-| `V` | Continue from `video_source`. |
+| `V` | Continue from `video_source`. The returned video contains the source video followed by the newly generated continuation; it is the merged result, not only the new continuation segment. |
 | `L` | Continue from the last generated video. |
 | `T` | Model definition sentinel for text/new-video availability. The stored value is usually empty rather than `T`. |
 
@@ -226,7 +228,7 @@ Only flags listed in `model_def["image_prompt_types_allowed"]` survive settings 
 | `Q` | Hidden/model-forced special option used by specific handlers. Do not set manually unless the model definition selects it. |
 | `&` | LTX-2 HDR-output option in the IC-LoRA control choices. |
 
-The same letter can have slightly different labels in different handlers. For example, `V` means "Control Video" in video mode and "Control Image" in image mode. Always prefer a value from the selected model's exposed choices instead of composing a string by hand.
+The same letter can have slightly different labels in different handlers. For example, `V` in `video_prompt_type` means "Control Video" in video mode and "Control Image" in image mode. Do not confuse it with `V` in `image_prompt_type`: there it selects video continuation, and WanGP returns the source video merged with the generated continuation. Always prefer a value from the selected model's exposed choices instead of composing a string by hand.
 
 ### `audio_prompt_type`
 
@@ -283,6 +285,8 @@ Examples: `T`, `TI`, `T1`, and `TI1`. Older saved values `I` and `IK` are migrat
 If the selected model does not support sliding windows, `W` modes are migrated to queue-task modes.
 
 ## API Metadata About Models
+
+This appendix describes internal Python/model-definition records, not the shape of every Deepy tool response. Compact model capabilities expose supported `capabilities` and `media_inputs` roles as lists and omit `setting_values`; use the returned contract and the relevant model-definition property for exact choices. The generation setting names documented above are shared across these presentations.
 
 Each in-memory model definition now includes a `metadata` object inferred after handler initialization:
 
@@ -350,3 +354,8 @@ Inference rules:
 - `media_inputs.audio.prompt` describes audio input support. It is not audio output; output audio is indicated by `outputs` containing `audio` or `capabilities.audio_output`.
 - `capabilities` provides common text/image/video/audio workflow booleans derived from the model definition.
 - `setting_values` exposes normalized allowed values for agent-facing settings, especially letter-flag settings such as `image_prompt_type`, `video_prompt_type`, `audio_prompt_type`, `prompt_enhancer`, and model-specific selectors such as `model_mode`.
+- For models whose outputs include video, compact model-schema metadata exposes `frames_maximum` as the suggested maximum for one generation window, including the first window of models without sliding-window support. WanGP first calls the model handler's `update_default_settings(...)` with an empty dictionary and uses its `sliding_window_size`; if absent, it uses `model_def["sliding_window_defaults"]["window_default"]`; if that is also absent, it selects the model-valid frame count closest to 97 using `frames_minimum`, `frames_steps`, and `frames_offset`. It is not the total-frame UI limit. Model definitions may use `frames_selection_maximum` to cap the total `video_length` selector. Non-video model schemas omit `frames_maximum`.
+
+---
+
+> Applies to: Generation setting meanings: image_mode, image_start/image_end, image_refs, video duration, audio inputs, flags, sampling, LoRAs and sliding windows. The API metadata appendix describes model declarations rather than generation parameters.

@@ -2,13 +2,14 @@ import os
 import shutil
 import sys
 import torch
+from shared.lora_paths import resolve_lora_dir
 from shared.utils import files_locator as fl
 from shared.utils.hf import build_hf_url
 from shared.utils.loras_mutipliers import parse_loras_multipliers
 import gradio as gr
 from pathlib import Path
 
-from .infos import LTX2_25_INFOS, LTX2_INFOS, LTX2_MSR_INFOS, LTX2_MSR_V2_INFOS
+from .infos import LTX2_25_DEEPY_INFOS, LTX2_25_INFOS, LTX2_25_MSR_INFOS, LTX2_INFOS, LTX2_MSR_INFOS, LTX2_MSR_V2_INFOS
 from .lora_utils import control_video_phase2_message
 from .ltx2_runtime import LTX2_OUTPAINTING_METHOD
 
@@ -24,6 +25,7 @@ _GEMMA4_INT8_FILENAME = f"{_GEMMA4_FOLDER}_int8_convrot.safetensors"
 _PRUNAAI_VAE_FILENAME = "ltx-2.3-22b_PrunaAI_vae.safetensors"
 _PRUNAAI_VAE_CONFIG_FILENAME = "ltx-2.3-22b_PrunaAI_vae.json"
 _NAD_VAE_FILENAME = "ltx-2.5-22b_diffusion_video_vae_bf16.safetensors"
+_MSR25_SLOT_FILENAME = "LTX-2.5-Licon-MSR-V1_slot_embeddings_bf16.safetensors"
 _GEMMA_TOKENIZER_FILES = [
     "added_tokens.json",
     "chat_template.json",
@@ -38,10 +40,11 @@ _GEMMA_TOKENIZER_FILES = [
 ]
 _GEMMA4_TOKENIZER_FILES = ["config.json", "chat_template.jinja", "tokenizer.json", "tokenizer_config.json"]
 _LORAS_MIGRATED = False
-_LORA_SPEC_KEYS = ("distilled_lora", "distilled_1_1_lora", "union_control_lora", "id_lora", "outpaint_lora", "inpaint_lora", "ingredients_lora", "hdr_lora")
+_LORA_SPEC_KEYS = ("distilled_lora", "distilled_1_1_lora", "pixel_spatial_upscaler_lora", "union_control_lora", "id_lora", "outpaint_lora", "inpaint_lora", "ingredients_lora", "hdr_lora")
 _SYSTEM_LORA_SPEC_KEYS = {
     "distilled": "distilled_lora",
     "distilled_1_1": "distilled_1_1_lora",
+    "pixel_spatial_upscaler": "pixel_spatial_upscaler_lora",
     "union_control": "union_control_lora",
     "id": "id_lora",
     "outpaint": "outpaint_lora",
@@ -97,6 +100,7 @@ _ARCH_SPECS = {
         "temporal_upscaler": "ltx-2.3-temporal-upscaler-x2-1.0.safetensors",
         "distilled_lora": "ltx-2.3-22b-distilled-lora-384.safetensors",
         "distilled_1_1_lora": "ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
+        "pixel_spatial_upscaler_lora": "ltx-2.3-22b-ic-lora-pixel-spatial-upscaler-x2-0.9.safetensors",
         "union_control_lora": "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors",
         "id_lora": "id-lora-celebvhq-ltx2.3.safetensors",
         "outpaint_lora": "ltx-2.3-22b-ic-lora-outpaint.safetensors",
@@ -122,6 +126,14 @@ _ARCH_SPECS = {
         "spatial_upscaler": "ltx-2.5-spatial-upscaler-x2-1.0_bf16.safetensors",
         "temporal_upscaler": "ltx-2.5-temporal-upscaler-x2-1.0_bf16.safetensors",
         "distilled_lora": "ltx-2.5-22b-distilled-lora-450_bf16.safetensors",
+        "pixel_spatial_upscaler_lora": "ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors",
+        "union_control_lora": "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors",
+        "id_lora": "id-lora-celebvhq-ltx2.3.safetensors",
+        "outpaint_lora": "ltx-2.3-22b-ic-lora-outpaint.safetensors",
+        "inpaint_lora": "ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors",
+        "ingredients_lora": "ltx-2.5-22b-ic-lora-ingredients-0.9.safetensors",
+        "hdr_lora": "ltx-2.3-22b-ic-lora-hdr-0.9.safetensors",
+        "hdr_scene_embeddings": "ltx-2.3-22b-ic-lora-hdr-scene-emb.safetensors",
         "video_vae": "ltx-2.5-22b_video_vae_bf16.safetensors",
         "diffusion_video_vae": _NAD_VAE_FILENAME,
         "audio_vae": "ltx-2.5-22b_audio_vae_bf16.safetensors",
@@ -133,10 +145,10 @@ _ARCH_SPECS = {
         "audio_embeddings_connector_bf16": "ltx-2.5-22b_audio_embeddings_connector_bf16.safetensors",
         "audio_embeddings_connector_int8": "ltx-2.5-22b_audio_embeddings_connector_int8_convrot.safetensors",
         "audio_embeddings_connector_nvfp4": "ltx-2.5-22b_audio_embeddings_connector_nvfp4_bf16.safetensors",
-        "profiles_dir": "ltx2_25",
-        "dev_profiles_dir": "ltx2_25",
-        "preset_profiles_dir": "ltx2_25",
-        "distilled_preset_profiles_dir": "ltx2_25",
+        "profiles_dir": "ltx2",
+        "dev_profiles_dir": "ltx2_25_dev_accelerators",
+        "preset_profiles_dir": "ltx2_presets",
+        "distilled_preset_profiles_dir": "ltx2_distilled_presets",
         "lora_dir": "ltx2",
     },
 }
@@ -147,8 +159,15 @@ _ARCH_SPECS["ltx2_22B_msr"] = {
     "preset_profiles_dir": "ltx2_msr_presets",
     "distilled_preset_profiles_dir": "ltx2_msr_distilled_presets",
 }
+_ARCH_SPECS["ltx2_25_22B_msr"] = {
+    **_ARCH_SPECS["ltx2_25_22B"],
+    "profiles_dir": "ltx2_25_msr",
+    "dev_profiles_dir": "ltx2_25_msr_dev_accelerators",
+    "preset_profiles_dir": "ltx2_25_msr_presets",
+    "distilled_preset_profiles_dir": "ltx2_25_msr_distilled_presets",
+}
 LTX2_22B_CLASS = {"ltx2_22B", "ltx2_22B_edit_anything", "ltx2_22B_msr", "joyai_echo"}
-LTX2_25_CLASS = {"ltx2_25_22B"}
+LTX2_25_CLASS = {"ltx2_25_22B", "ltx2_25_22B_msr"}
 for model_type in LTX2_22B_CLASS:
     if model_type != "ltx2_22B" and model_type not in _ARCH_SPECS:
         _ARCH_SPECS[model_type]=_ARCH_SPECS["ltx2_22B"]
@@ -159,6 +178,10 @@ def _get_arch_spec(base_model_type: str | None) -> dict:
 
 def _is_ltx25(base_model_type: str | None) -> bool:
     return base_model_type in LTX2_25_CLASS
+
+
+def _supports_main_22b_loras(base_model_type: str | None) -> bool:
+    return base_model_type == "ltx2_22B" or _is_ltx25(base_model_type)
 
 
 def _ltx2_outpainting_method() -> int:
@@ -261,15 +284,15 @@ def _default_perturbation_layers(base_model_type: str | None) -> list[int]:
 def _default_dev_settings(base_model_type: str | None) -> dict:
     if _is_ltx25(base_model_type):
         return {
-            "num_inference_steps": 30,
+            "num_inference_steps": 8,
             "video_length": 241,
             "resolution": "1280x704",
-            "sample_solver": "euler",
-            "guidance_scale": 3.0,
-            "audio_guidance_scale": 7.0,
-            "alt_guidance_scale": 3.0,
-            "alt_scale": 0.7,
-            "perturbation_switch": 2,
+            "sample_solver": "distilled_8_steps_ancestral",
+            "guidance_scale": 1.0,
+            "audio_guidance_scale": 1.0,
+            "alt_guidance_scale": 1.0,
+            "alt_scale": 0.0,
+            "perturbation_switch": 0,
             "perturbation_layers": _default_perturbation_layers(base_model_type),
             "perturbation_start_perc": 0,
             "perturbation_end_perc": 100,
@@ -318,7 +341,7 @@ def _is_editanything_model(model_def) -> bool:
 
 
 def _is_msr_model(base_model_type, model_def) -> bool:
-    return base_model_type == "ltx2_22B_msr" or model_def.get("ltx2_msr", False)
+    return base_model_type in {"ltx2_22B_msr", "ltx2_25_22B_msr"} or model_def.get("ltx2_msr", False)
 
 
 def _is_distilled_model(model_def) -> bool:
@@ -360,10 +383,11 @@ def _get_multi_file_names(model_def, base_model_type, transformer_path=None):
     return names
 
 
-def _resolve_multi_file_paths(model_def, base_model_type, transformer_path=None):
+def _resolve_multi_file_paths(model_def, base_model_type, transformer_path=None, include_spatial_upsampler=True):
     spec = _get_arch_spec(base_model_type)
     paths = {key: fl.locate_file(name) for key, name in _get_multi_file_names(model_def, base_model_type, transformer_path).items()}
-    paths["spatial_upsampler"] = fl.locate_file(spec["spatial_upscaler"])
+    if include_spatial_upsampler:
+        paths["spatial_upsampler"] = fl.locate_file(spec["spatial_upscaler"])
     model_config = os.path.join(os.path.dirname(__file__), "configs", spec["config_file"])
     if not os.path.isfile(model_config):
         raise FileNotFoundError(f"Missing LTX config file: {model_config}")
@@ -386,8 +410,7 @@ def _migrate_loras():
 
     moved = set()
     for spec in _ARCH_SPECS.values():
-        lora_dir = Path(lora_root) / spec["lora_dir"]
-        lora_dir.mkdir(parents=True, exist_ok=True)
+        lora_dir = Path(resolve_lora_dir(spec["lora_dir"], lora_root, wgp.args.lora_config))
         for key in _LORA_SPEC_KEYS:
             filename = spec.get(key, None)
             if filename is None or filename in moved:
@@ -417,10 +440,10 @@ def _notify_control_video_phase2(base_model_type, model_def, inputs, any_outpain
     outpainting_method = _ltx2_outpainting_method()
     new_outpainting = any_outpainting and outpainting_method == 2
     builtins = [
-        spec.get("hdr_lora") if base_model_type == "ltx2_22B" and "&" in video_prompt_type else None,
+        spec.get("hdr_lora") if _supports_main_22b_loras(base_model_type) and "&" in video_prompt_type else None,
         spec.get("union_control_lora") if any(letter in video_prompt_type for letter in "OPDE") else None,
-        spec.get("outpaint_lora") if base_model_type == "ltx2_22B" and any_outpainting and outpainting_method == 1 else None,
-        spec.get("inpaint_lora") if base_model_type == "ltx2_22B" and ("M" in video_prompt_type and "A" in video_prompt_type or new_outpainting) else None,
+        spec.get("outpaint_lora") if _supports_main_22b_loras(base_model_type) and any_outpainting and outpainting_method == 1 else None,
+        spec.get("inpaint_lora") if _supports_main_22b_loras(base_model_type) and ("M" in video_prompt_type and "A" in video_prompt_type or new_outpainting) else None,
     ]
     extra_loras = [os.path.join(lora_dir, name) if lora_dir else name for name in builtins if name and name.lower() not in selected]
     extra_mults = [1.0] * len(extra_loras)
@@ -442,15 +465,17 @@ class family_handler:
     @staticmethod
     def query_supported_types():
         _migrate_loras()
-        return ["ltx2_19B", "ltx2_22B", "ltx2_25_22B", "ltx2_22B_edit_anything", "ltx2_22B_msr", "joyai_echo"]
+        return ["ltx2_19B", "ltx2_22B", "ltx2_25_22B", "ltx2_22B_edit_anything", "ltx2_22B_msr", "ltx2_25_22B_msr", "joyai_echo"]
 
     @staticmethod
     def query_family_maps():
 
         models_eqv_map = {
             "ltx2_19B" : "ltx2_22B",
+            "ltx2_25_22B" : "ltx2_22B",
             "ltx2_22B_edit_anything" : "ltx2_22B",
             "ltx2_22B_msr" : "ltx2_22B",
+            "ltx2_25_22B_msr" : "ltx2_22B",
         }
 
         models_comp_map = { 
@@ -498,21 +523,23 @@ class family_handler:
         extra_model_def = {
             "ltx2_22B_class": base_model_type in LTX2_22B_CLASS or ltx25,
             "ltx2_edit_anything": editanything_ref,
-            "infos": model_def.get("infos", LTX2_25_INFOS if ltx25 else LTX2_MSR_V2_INFOS if msr_v2 else LTX2_MSR_INFOS if msr else LTX2_INFOS),
+            "infos": model_def.get("infos", LTX2_25_MSR_INFOS if ltx25 and msr else LTX2_25_INFOS if ltx25 else LTX2_MSR_V2_INFOS if msr_v2 else LTX2_MSR_INFOS if msr else LTX2_INFOS),
             "text_encoder_folder": gemma_folder,
             "text_encoder_URLs": [
                 build_hf_url("DeepBeepMeep/LTX-2", gemma_folder, gemma_files[0]),
                 build_hf_url("DeepBeepMeep/LTX-2", gemma_folder, gemma_files[1]),
             ],
             "dtype": "bf16",
-            "fps": 25,
+            "fps": 24,
+            "prompt_enhancer_video_duration": True,
             "frames_minimum": 17,
             "frames_steps": 8,
             "sliding_window": not msr,
             "returns_audio": True,
             "auto_null_audio": True,
             "multimedia_generation": True,
-            "profiles_dir": [spec["profiles_dir"]] if ltx25 or distilled else [spec["profiles_dir"], spec["dev_profiles_dir"]],
+            "image_end_frame_position": True,
+            "profiles_dir": [spec["profiles_dir"]] if distilled else [spec["profiles_dir"], spec["dev_profiles_dir"]],
             "ltx2_spatial_upscaler_file": spec["spatial_upscaler"],
             "ltx2_hdr_lora_file": spec.get("hdr_lora", ""),
             "ltx2_hdr_scene_embeddings_file": spec.get("hdr_scene_embeddings", ""),
@@ -524,42 +551,33 @@ class family_handler:
             "keep_frames_video_guide_not_supported": True,
         }
         extra_model_def["prompt_enhancer_button_label"] = "Write"
-        if base_model_type in LTX2_22B_CLASS:
+        if base_model_type in LTX2_22B_CLASS or ltx25:
             extra_model_def["system_configs"] = {
                 "_name": "VAE",
-                "_default_label": "Standard VAE (Fast)",
-                "NAD Diffusion Decoder": {
-                    "name": "NAD Diffusion Decoder (Higher VRAM, Slow)",
-                    "ltx2_video_vae_file": spec["diffusion_video_vae"],
-                },
+                "_default_label": "Default VAE",
                 "PrunaAI VAE": {
-                    "name": "PrunaAI VAE (up to x2 faster)",
+                    "name": "PrunaAI VAE (faster, slightly worse quality)",
                     "ltx2_video_vae_file": _PRUNAAI_VAE_FILENAME,
                     "ltx2_video_vae_config_file": _PRUNAAI_VAE_CONFIG_FILENAME,
                     "ltx2_pruna_vae": True,
                 },
-            }
-        elif ltx25:
-            extra_model_def["system_configs"] = {
-                "_name": "VAE",
-                "_default_label": "Fast VAE",
                 "NAD Diffusion Decoder": {
-                    "name": "NAD Diffusion Decoder",
+                    "name": "NAD Diffusion Decoder (slower, higher VRAM, better motion)",
                     "ltx2_video_vae_file": spec["diffusion_video_vae"],
                 },
             }
-        if not ltx25:
-            extra_model_def.update(_get_system_lora_urls(spec))
+        extra_model_def.update(_get_system_lora_urls(spec))
         if distilled:
             extra_model_def["ltx2_pipeline"] = "distilled"
-        elif not ltx25:
+            extra_model_def["accelerated"] = "native"
+        else:
             extra_model_def["finetune_custom_urls"] =  [ "ltx2_lora_distilled"]
 
             
         if editanything_ref:
             extra_model_def.update(_EDITANYTHING_MODEL_DEF)
         
-        if base_model_type in ["ltx2_22B"]:
+        if _supports_main_22b_loras(base_model_type):
 
             extra_model_def["video_guide_outpainting"] = [0,1]
             extra_model_def["video_guide_outpainting_label"] = "Enable Spatial Outpainting on Control Video using LTX2 Outpainting IC-LoRA"
@@ -592,7 +610,7 @@ class family_handler:
                     "fps": 25,
                     "image_prompt_types_allowed": "TSV",
                     "prompt_infos": JOYAI_ECHO_PROMPT_INFOS,
-                    "prompt_enhancer_def": {"selection": ["TM", "TIM"], "labels": {"TM": "A JoyAI-Echo multi-shot prompt using existing Text Prompt", "TIM": "A JoyAI-Echo multi-shot prompt using existing Text Prompt and Start Image"}, "default": ""},
+                    "prompt_enhancer_def": {"selection": ["TM", "TIM"], "labels": {"TM": "A JoyAI-Echo multi-shot prompt using existing Text Prompt", "TIM": "A JoyAI-Echo multi-shot prompt using existing Text Prompt and {image_inputs}"}, "default": ""},
                     "text_prompt_enhancer_instructions1": JOYAI_ECHO_PROMPT_ENHANCER,
                     "video_prompt_enhancer_instructions1": JOYAI_ECHO_PROMPT_ENHANCER,
                     "image_prompt_enhancer_instructions1": JOYAI_ECHO_PROMPT_ENHANCER,
@@ -607,11 +625,12 @@ class family_handler:
                 }
             )
         else:
-            from .prompt_enhancer import LTX2_PROMPT_INFOS, LTX2_RELAYED_IMAGE_PROMPT, LTX2_RELAYED_PROMPT
+            from .prompt_enhancer import LTX2_25_DEEPY_PROMPT_INFOS, LTX2_PROMPT_INFOS, LTX2_RELAYED_IMAGE_PROMPT, LTX2_RELAYED_PROMPT
 
-            if ltx25:
-                audio_prompt_selection = ["", "A", "K", "2"]
-            elif msr:
+            if ltx25 and not (msr or editanything_ref):
+                extra_model_def.update({"deepy_infos": LTX2_25_DEEPY_INFOS, "deepy_prompt_infos": LTX2_25_DEEPY_PROMPT_INFOS})
+
+            if msr:
                 audio_prompt_selection = ["", "A"]
             elif editanything_ref and not distilled:
                 audio_prompt_selection = ["", "A", "K"]
@@ -624,6 +643,9 @@ class family_handler:
                 "2": "Generate Audio based on Control Video and Text Prompt",
                 "A1OF": "Generate Video based on Reference Voice (ID-LoRA) and Text Prompt",
             }
+            if ltx25:
+                audio_prompt_selection = [choice for choice in audio_prompt_selection if choice != "A1OF"]
+                audio_prompt_labels.pop("A1OF")
             extra_model_def.update(
                 {
                     "image_prompt_types_allowed": "TSEVL",
@@ -636,7 +658,7 @@ class family_handler:
                     "audio_prompt_type_sources": {
                         "selection": audio_prompt_selection,
                         "labels": audio_prompt_labels,
-                        "custom_flags": {
+                        "custom_flags": {"2": audio_prompt_labels["2"]} if ltx25 else {
                             "1": "Reference Voice (ID-LoRA)",
                             "2": "Generate Audio based on Control Video and Text Prompt",
                         },
@@ -649,9 +671,9 @@ class family_handler:
                         "selection": ["T", "TI", "T1", "TI1"],
                         "labels": {
                             "T": "An Enhanced Prompt using existing Text Prompt",
-                            "TIV": "An Enhanced Prompt using existing Text Prompt and Start Image",
+                            "TIV": "An Enhanced Prompt using existing Text Prompt and {image_inputs}",
                             "T1V": "An Enhanced Relayed Prompt using existing Text Prompt",
-                            "TI1V": "An Enhanced Relayed Prompt using existing Text Prompt and Start Image",
+                            "TI1V": "An Enhanced Relayed Prompt using existing Text Prompt and {image_inputs}",
                         },
                         "default": "",
                     },
@@ -677,23 +699,21 @@ class family_handler:
                 "label": "Unmasked Area Strength (higher = unmasked area closer to control video)",
                 "name": "Unmasked Area Strength",
             }
-            if ltx25:
-                control_choices = [("No Control Video", ""), ("Raw Control Video", "VG"), ("Inject Frames", "KFI")]
-            elif msr:
+            if msr:
                 control_choices = [("No Control Video", "")]
             elif base_model_type in ["ltx2_22B_edit_anything"]:
                 control_choices = [("EditAnything Source Video", "VGI")]
             else:
                 control_choices = [("No Video Process", "")]
                 control_choices += [("Transfer Human Motion", "PVG"), ("Transfer Human Motion With Pose Alignment", "OVG"), ("Transfer Depth", "DVG"), ("Transfer Canny Edges", "EVG"), ("LTX2 Raw Format / Control Video for Ic Lora", "VG")]
-                if base_model_type == "ltx2_22B":
+                if _supports_main_22b_loras(base_model_type):
                     control_choices += [("Inpaint Masked Area", "MVG"), ("Ingredients Reference Sheet", "I"), ("Convert SDR to HDR (IC-LoRA)", f"V&G")]
                 control_choices += [("Inject Frames", "KFI")]
             control_choices_image = [(label, value) for label, value in control_choices if value not in ("OVG", "MVG", "I", "KFI", "V&G")]
             if not msr:
                 guide_custom_choices = {
                     "choices": control_choices,
-                    "letters_filter": f"OPDEMVG&KFI",
+                    "letters_filter": "OPDEMVG&KFI",
                     "default": "VGI" if editanything_ref else "",
                     "label": "Control Video / Frames Injection",
                     "visible":  not editanything_ref  ,
@@ -704,7 +724,7 @@ class family_handler:
             extra_model_def["one_image_ref_only"] = True
             if editanything_ref:
                 extra_model_def["one_image_ref_needed"] = True
-            extra_model_def["mask_preprocessing"] = {"selection": [""], "visible": False} if ltx25 or editanything_ref or msr else {"selection": ["", "A", "NA", "XA", "XNA"]}
+            extra_model_def["mask_preprocessing"] = {"selection": [""], "visible": False} if editanything_ref or msr else {"selection": ["", "A", "NA", "XA", "XNA"]}
             if msr:
                 extra_model_def.update(
                     {
@@ -727,6 +747,9 @@ class family_handler:
                         "ltx2_msr_frame_count": int(model_def.get("ltx2_msr_frame_count", 41)),
                     }
                 )
+                if ltx25:
+                    extra_model_def["ltx2_msr_slot_embeddings_file"] = _MSR25_SLOT_FILENAME
+                    extra_model_def["image_ref_choices"]["choices"][0] = ("Up to 4 Subjects / Objects", "I")
                 if msr_v2:
                     extra_model_def["custom_settings"] = list(model_def.get("custom_settings", [])) if isinstance(model_def.get("custom_settings", []), list) else []
                     extra_model_def["custom_settings"].append(
@@ -772,7 +795,9 @@ class family_handler:
                     "perturbation_layers_max": 48,
                 }
             )
-            if base_model_type in LTX2_22B_CLASS:
+            if ltx25:
+                extra_model_def["sample_solvers"] = [("Distilled 8 Steps (Euler Ancestral)", "distilled_8_steps_ancestral"), ("Distilled 8 Steps (Euler)", "distilled_8_steps"), ("Euler", "euler"), ("HQ (res2s)", "res2s")]
+            elif base_model_type in LTX2_22B_CLASS:
                 extra_model_def["sample_solvers"] = [("Distilled 8 Steps", "distilled_8_steps"), ("Euler", "euler"), ("HQ (res2s)", "res2s")]
         extra_model_def["guidance_max_phases"] = 2
         extra_model_def["visible_phases"] = 0 if distilled else 1
@@ -801,17 +826,8 @@ class family_handler:
         return get_rgb_factors("ltx2", "ltx2_22B" if _is_ltx25(base_model_type) else base_model_type)
 
     @staticmethod
-    def register_lora_cli_args(parser, lora_root):
-        parser.add_argument(
-            "--lora-dir-ltx2",
-            type=str,
-            default=None,
-            help=f"Path to a directory that contains LTX-2 LoRAs (default: {os.path.join(lora_root, 'ltx2')})",
-        )
-
-    @staticmethod
-    def get_lora_dir(base_model_type, args, lora_root):
-        return getattr(args, "lora_dir_ltx2", None) or os.path.join(lora_root, "ltx2")
+    def get_lora_dir(base_model_type):
+        return "ltx2"
 
     @staticmethod
     def query_model_files(computeList, base_model_type, model_def=None):
@@ -831,6 +847,8 @@ class family_handler:
         for name in component_names.values():
             if name not in file_list:
                 file_list.append(name)
+        if _is_ltx25(base_model_type) and _is_msr_model(base_model_type, model_def):
+            file_list.append(_MSR25_SLOT_FILENAME)
 
         download_def = [
             {
@@ -870,12 +888,16 @@ class family_handler:
             if inputs.get("perturbation",0) == 2:
                 inputs["perturbation"] = 0
         else:
-            sample_solver = inputs.get("sample_solver", "euler" if base_model_type in LTX2_22B_CLASS else "").lower()
-            if base_model_type in LTX2_22B_CLASS:
-                if sample_solver not in {"distilled_8_steps", "euler", "res2s"}:
+            sampler_enabled = base_model_type in LTX2_22B_CLASS or _is_ltx25(base_model_type)
+            sample_solver = inputs.get("sample_solver", "euler" if sampler_enabled else "").lower()
+            if sampler_enabled:
+                supported_samplers = {"distilled_8_steps", "euler", "res2s"}
+                if _is_ltx25(base_model_type):
+                    supported_samplers.add("distilled_8_steps_ancestral")
+                if sample_solver not in supported_samplers:
                     return f"Unsupported LTX2 sampler '{sample_solver}'."
                 inputs["sample_solver"] = sample_solver
-                if sample_solver == "distilled_8_steps":
+                if sample_solver in {"distilled_8_steps", "distilled_8_steps_ancestral"}:
                     inputs["num_inference_steps"] = 8
                 if sample_solver == "res2s":
                     if inputs.get("apg_switch", 0):
@@ -921,15 +943,15 @@ class family_handler:
             if inputs.get("video_guide") is None:
                 return "You must provide a Control Video to generate audio from it."
         if "&" in video_prompt_type:
-            if base_model_type != "ltx2_22B":
-                return "LTX2 HDR IC-LoRA is supported only with LTX-2.3 22B."
+            if not _supports_main_22b_loras(base_model_type):
+                return "LTX2 HDR IC-LoRA is supported only with the main 22B models."
             if any(letter in video_prompt_type for letter in "OPDE") or any_outpainting:
                 return "LTX2 HDR IC-LoRA is not compatible with Pose/Depth/Canny/Outpaint control modes."
             if "F" in video_prompt_type:
                 return "LTX2 HDR IC-LoRA is not yet compatible with Inject Frames."
         if "M" in video_prompt_type:
-            if base_model_type != "ltx2_22B":
-                return "LTX2 inpainting IC-LoRA is supported only with LTX-2.3 22B."
+            if not _supports_main_22b_loras(base_model_type):
+                return "LTX2 inpainting IC-LoRA is supported only with the main 22B models."
             if "A" not in video_prompt_type:
                 return "LTX2 inpainting requires a Video Mask."
             if float(inputs.get("masking_strength", 0)) != 0.0:
@@ -987,7 +1009,7 @@ class family_handler:
                 transformer_path = transformer_path[0]
         else:
             transformer_path = model_filename
-        checkpoint_paths = _resolve_multi_file_paths(model_def, base_model_type, transformer_path)
+        checkpoint_paths = _resolve_multi_file_paths(model_def, base_model_type, transformer_path, include_spatial_upsampler=not model_type.startswith("ltx2_upsampler_"))
         checkpoint_paths["transformer"] = transformer_path
         if transformer_modules:
             checkpoint_paths["transformer_modules"] = transformer_modules
@@ -1029,8 +1051,9 @@ class family_handler:
             "audio_encoder": ltx2_model.audio_encoder,
             "audio_decoder": ltx2_model.audio_decoder,
             "vocoder": ltx2_model.vocoder,
-            "spatial_upsampler": ltx2_model.spatial_upsampler,
         }
+        if ltx2_model.spatial_upsampler is not None:
+            pipe["spatial_upsampler"] = ltx2_model.spatial_upsampler
         if ltx2_model.split_text_connectors:
             pipe["video_embeddings_connector"] = ltx2_model.text_embeddings_connector.video_embeddings_connector
             pipe["audio_embeddings_connector"] = ltx2_model.text_embeddings_connector.audio_embeddings_connector
@@ -1140,7 +1163,7 @@ class family_handler:
                     "video_prompt_type": "KI",
                     "audio_prompt_type": "",
                     "video_length": 145,
-                    "resolution": "1280x720",
+                    "resolution": "1280x704" if _is_ltx25(base_model_type) else "1280x720",
                     "force_fps": "",
                     "remove_background_images_ref": 1,
                     "guidance_phases": 2,
