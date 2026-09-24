@@ -36,9 +36,11 @@ def run_test(server_url=SERVER_URL, product_img=None, user_img=None):
 
     prompt = (
         "HIGH-FIDELITY VIRTUAL TRY-ON — Image 0=GARMENT, Image 1=PERSON — "
-        "In Image 0, replace only the face and head with the exact facial features, smile, and curly hair of the woman in Image 1. "
-        "The subject must wear the complete outfit from Image 0 exactly as shown from top to bottom, including the strapless feather bodice and matching trousers. "
-        "Do not include any clothing, white sweater, or blouse from Image 1. "
+        "Full-body fashion photograph of the person from Image 1. "
+        "Dress the person from Image 1 in the exact clothing outfit from Image 0, realistically tailored and draped to fit her natural body shape, proportions, and size. "
+        "Preserve the person's exact face, smile, facial features, red curly hair, skin tone, and body build from Image 1. "
+        "Completely remove and replace all original clothing worn in Image 1 (including any white sweater or blouse), "
+        "so the subject is wearing only the complete outfit from Image 0 (the strapless jumpsuit with brown feather trim bustier and wide-leg trousers). "
         "FULL-BODY luxury commercial fashion photography, cinematic studio lighting, photorealistic."
     )
 
