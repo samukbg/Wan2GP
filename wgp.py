@@ -27,6 +27,14 @@ import torch
 import torch._logging as tlog
 if hasattr(torch.cuda, "ipc_collect") and os.name == "nt":
     torch.cuda.ipc_collect = lambda: None
+if hasattr(torch.cuda, "empty_cache"):
+    _orig_cuda_empty_cache = torch.cuda.empty_cache
+    def _safe_cuda_empty_cache():
+        try:
+            _orig_cuda_empty_cache()
+        except Exception:
+            pass
+    torch.cuda.empty_cache = _safe_cuda_empty_cache
 
 # tlog.set_logs(recompiles=True, guards=True, graph_breaks=True)
 # from shared.utils.crash_diagnostics import install_wgp_crash_diagnostics; install_wgp_crash_diagnostics(__file__)
@@ -283,11 +291,18 @@ def release_model():
     if "_cache" in offload.shared_state:
         del offload.shared_state["_cache"]
     if offloadobj is not None:
-        offloadobj.release()
-        offloadobj = None
-    offload.flush_torch_caches()
+        try:
+            offloadobj.release()
+        except Exception as e:
+            print(f"[release_model] offloadobj.release() warning: {e}")
+        finally:
+            offloadobj = None
+    try:
+        offload.flush_torch_caches()
+    except Exception:
+        pass
     gc.collect()
-    torch.cuda.empty_cache()
+    safe_cuda_cleanup()
     reload_needed = True
 def get_unique_id():
     global unique_id  
@@ -13855,7 +13870,10 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
     import torch
     from mmgp import offload
     if transformer_type != model_type:
-        release_model()
+        try:
+            release_model()
+        except Exception as e:
+            print(f"[API /generate] Initial release_model warning: {e}")
         transformer_type = None
 
     if torch.cuda.is_available():

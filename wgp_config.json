@@ -10,7 +10,6 @@
     "compile": "",
     "metadata_type": "metadata",
     "boost": 1,
-    "enable_int8_kernels": 0,
     "clear_file_list": 5,
     "enable_4k_resolutions": 0,
     "max_reserved_loras": -1,
@@ -47,7 +46,8 @@
         "flux2": "flux2_klein_9b",
         "ideogram4": "ideogram4",
         "krea2": "krea2_turbo",
-        "minimax_h3": "minimax_h3_ref2va_pruned"
+        "minimax_h3": "minimax_h3_ref2va_pruned",
+        "qwen_image_2": "qwen_image_21_7B"
     },
     "last_model_per_type": {
         "ltx2_19B": "ltx2_19B",
@@ -73,12 +73,13 @@
         "ti2v_2_2": "ti2v_2_2_fastwan",
         "animate2": "animate2_distilled",
         "i2v_2_2": "i2v_2_2_Enhanced_Lightning_v2",
-        "ltx2_25_22B": "ltx2_25_22B_distilled"
+        "ltx2_25_22B": "ltx2_25_22B_distilled",
+        "qwen_image_21_7B": "qwen_image_21_7B"
     },
-    "last_model_type": "ltx2_25_22B_distilled",
-    "last_resolution_choice": "1088x832",
+    "last_model_type": "qwen_image_21_7B",
+    "last_resolution_choice": "704x1280",
     "last_resolution_per_group": {
-        "720p": "1088x832",
+        "720p": "704x1280",
         "480p": "832x480",
         "1080p": "1920x1088"
     },
@@ -91,7 +92,7 @@
     "deepy_vram_mode": "unload",
     "deepy_tool_gen_image": "Z Image Turbo",
     "deepy_tool_edit_image": "Flux Klein 9B",
-    "deepy_tool_gen_video": "LTX-2 2.3 Distilled",
+    "deepy_tool_gen_video": "LTX-2 2.3 Distilled 1.0",
     "deepy_tool_gen_video_with_speech": "Infinitalk",
     "deepy_tool_gen_speech_from_description": "Qwen3 1.7B",
     "deepy_tool_gen_speech_from_sample": "Index TTS 2",
@@ -121,9 +122,49 @@
         "persistence": 1,
         "seedvr2": {
             "window_size": 0
+        },
+        "dlss5": {
+            "depth_resolution": "half",
+            "motion_vector": "original"
+        },
+        "h3_face_refiner": {
+            "model_mode": "h3",
+            "detector_confidence": 0.25,
+            "crop_factor": 1.6,
+            "canvas_mode": "auto_no_downscale",
+            "canvas_width": 512,
+            "canvas_height": 512,
+            "smooth_window": 21,
+            "size_smooth_window": 51,
+            "smooth_method": "gaussian",
+            "size_mode": "per_frame",
+            "identity_threshold": 0.28,
+            "auto_min_face_height": 32,
+            "auto_min_presence": 0.2,
+            "fallback_detector": "person_yolov8m-seg.safetensors",
+            "fallback_head_frac": 0.5,
+            "denoising_strength": 0.45,
+            "sampling_steps": 4,
+            "flow_shift": 12.0,
+            "sample_solver": "er_sde",
+            "turbo_lora_strength": 1.0,
+            "strength": 0.75,
+            "paste_region": "face_only",
+            "mask_dilation": 24,
+            "feather": 24,
+            "colour_match": 1.0,
+            "blend": 1.0,
+            "undetected_frames": "fade_out",
+            "feather_scales_with_crop": false,
+            "window_size": 362,
+            "window_overlap": 18
+        },
+        "ltx2": {
+            "window_size": 81,
+            "window_overlap": 17
         }
     },
-    "extensions_defaults_version": "1.19",
+    "extensions_defaults_version": "1.23",
     "installed_remote_plugins": [],
     "hdr_video_crf": 8,
     "audio_processors": {
@@ -140,11 +181,263 @@
         },
         "persistence": 1
     },
-    "temporal_upsamplers": {
-        "rife": {
-            "version": "v4"
+    "temporal_upsamplers": {},
+    "keep_resolution_on_model_switch": true,
+    "model_output_filter": "all",
+    "notification_apprise_urls_secure": true,
+    "notification_apprise_credential_id": "",
+    "notification_apprise_urls": [],
+    "notification_on_generation": false,
+    "notification_on_queue_complete": false,
+    "notification_on_queue_interrupted": false,
+    "prompt_enhancer_speculative_decoding": {
+        "method": "auto",
+        "tokens": null
+    },
+    "llm_engines": {
+        "deepy": "qwen35_4b",
+        "prompt_enhancer": "same_as_deepy",
+        "visual_inspector": "auto",
+        "profiles": {
+            "codex": {
+                "executable": "codex",
+                "model": "",
+                "reasoning_effort": "",
+                "model_catalog": [
+                    {
+                        "model": "gpt-5.6-sol",
+                        "display_name": "GPT-5.6-Sol",
+                        "is_default": true,
+                        "default_reasoning_effort": "low",
+                        "reasoning_efforts": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max",
+                            "ultra"
+                        ]
+                    },
+                    {
+                        "model": "gpt-5.6-terra",
+                        "display_name": "GPT-5.6-Terra",
+                        "is_default": false,
+                        "default_reasoning_effort": "medium",
+                        "reasoning_efforts": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max",
+                            "ultra"
+                        ]
+                    },
+                    {
+                        "model": "gpt-5.6-luna",
+                        "display_name": "GPT-5.6-Luna",
+                        "is_default": false,
+                        "default_reasoning_effort": "medium",
+                        "reasoning_efforts": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                        ]
+                    },
+                    {
+                        "model": "gpt-5.5",
+                        "display_name": "GPT-5.5",
+                        "is_default": false,
+                        "default_reasoning_effort": "medium",
+                        "reasoning_efforts": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh"
+                        ]
+                    },
+                    {
+                        "model": "gpt-5.4",
+                        "display_name": "GPT-5.4",
+                        "is_default": false,
+                        "default_reasoning_effort": "medium",
+                        "reasoning_efforts": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh"
+                        ]
+                    },
+                    {
+                        "model": "gpt-5.4-mini",
+                        "display_name": "GPT-5.4-Mini",
+                        "is_default": false,
+                        "default_reasoning_effort": "medium",
+                        "reasoning_efforts": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh"
+                        ]
+                    },
+                    {
+                        "model": "gpt-5.3-codex-spark",
+                        "display_name": "GPT-5.3-Codex-Spark",
+                        "is_default": false,
+                        "default_reasoning_effort": "high",
+                        "reasoning_efforts": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh"
+                        ]
+                    }
+                ]
+            },
+            "claude": {
+                "executable": "claude",
+                "model": "",
+                "reasoning_effort": "",
+                "model_catalog": [
+                    {
+                        "model": "best",
+                        "display_name": "Best available",
+                        "is_default": false,
+                        "default_reasoning_effort": "",
+                        "reasoning_efforts": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                        ]
+                    },
+                    {
+                        "model": "fable",
+                        "display_name": "Fable",
+                        "is_default": false,
+                        "default_reasoning_effort": "",
+                        "reasoning_efforts": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                        ]
+                    },
+                    {
+                        "model": "sonnet",
+                        "display_name": "Latest Sonnet",
+                        "is_default": false,
+                        "default_reasoning_effort": "",
+                        "reasoning_efforts": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                        ]
+                    },
+                    {
+                        "model": "opus",
+                        "display_name": "Latest Opus",
+                        "is_default": false,
+                        "default_reasoning_effort": "",
+                        "reasoning_efforts": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                        ]
+                    },
+                    {
+                        "model": "haiku",
+                        "display_name": "Latest Haiku",
+                        "is_default": false,
+                        "default_reasoning_effort": "",
+                        "reasoning_efforts": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                        ]
+                    },
+                    {
+                        "model": "sonnet[1m]",
+                        "display_name": "Sonnet (1M context)",
+                        "is_default": false,
+                        "default_reasoning_effort": "",
+                        "reasoning_efforts": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                        ]
+                    },
+                    {
+                        "model": "opus[1m]",
+                        "display_name": "Opus (1M context)",
+                        "is_default": false,
+                        "default_reasoning_effort": "",
+                        "reasoning_efforts": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                        ]
+                    },
+                    {
+                        "model": "opusplan",
+                        "display_name": "Opus for planning, Sonnet for execution",
+                        "is_default": false,
+                        "default_reasoning_effort": "",
+                        "reasoning_efforts": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                        ]
+                    }
+                ]
+            },
+            "opencode": {
+                "executable": "opencode",
+                "base_url": "http://127.0.0.1:4096",
+                "provider": "",
+                "model": "",
+                "reasoning_effort": "",
+                "config": "",
+                "model_catalog": []
+            }
         }
     },
-    "keep_resolution_on_model_switch": true,
-    "model_output_filter": "all"
+    "int8_kernels": "disabled",
+    "kernel_precision": "fast",
+    "deepy_type": "zero",
+    "deepy_voice_language": "auto",
+    "deepy_tool_gen_song": "ACE-Step 1.5 Turbo LM 1.7B",
+    "deepy_tool_gen_video_with_refs": "MiniMax H3 Ref2VA Pruned Turbo Lightx2v 8 Steps",
+    "deepy_kv_cache_quantization": "auto",
+    "deepy_compaction_type": "discard",
+    "deepy_compaction_thinking": false,
+    "deepy_repetition_penalty": true,
+    "deepy_zero_custom_system_prompt": "",
+    "deepy_prime_custom_system_prompt": "Use the current Speed and Model Size preferences for choices left unspecified by the user when selecting beyond configured templates.",
+    "deepy_model_speed": "fast",
+    "deepy_model_size": "smaller",
+    "deepy_prime_mcp_servers": {},
+    "deepy_mcp_auto_discover_paths": false,
+    "deepy_allow_read_file_system": "disabled",
+    "deepy_file_system_paths": [],
+    "deepy_read_everywhere": false,
+    "deepy_session_reset_mode": "new_session",
+    "deepy_session_gallery_media_mode": "link",
+    "deepy_multi_session": "disabled",
+    "last_workspace_id": "0441ae2059b041f786c60dcb2b7b55da"
 }
