@@ -304,7 +304,7 @@ def _generate_remote_vllm_prompt(
 ) -> List[str]:
     import requests
     url = "http://localhost:11434/v1/chat/completions"
-    model = "qwen3.6-27b-mtp-gguf"
+    model = "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M"
 
     results = []
     for msg in messages:
@@ -327,18 +327,30 @@ def _generate_remote_vllm_prompt(
             "max_tokens": max_new_tokens,
             "temperature": temperature if temperature is not None else 0.6,
             "top_p": top_p if top_p is not None else 0.9,
+            # Thinking model: hidden reasoning can eat max_tokens and leave an empty prompt; skip it.
+            "reasoning_effort": "none",
         }
         if seed is not None:
             payload["seed"] = int(seed)
 
         try:
             response = requests.post(url, json=payload, timeout=60)
+            if response.status_code == 500:
+                # Usually a transient failed model load (RAM briefly exhausted); Ollama retries the load.
+                response = requests.post(url, json=payload, timeout=60)
             response.raise_for_status()
             data = response.json()
             results.append(data["choices"][0]["message"]["content"].strip())
         except Exception as e:
             logger.error(f"Error calling remote vLLM: {e}")
             results.append(f"Error: could not generate prompt from remote vLLM ({e})")
+
+    # The OpenAI-compatible endpoint can't set keep_alive, so Ollama would keep the model in VRAM for
+    # 5 more minutes, competing with the Wan2GP model loaded next. Unload it right away.
+    try:
+        requests.post("http://localhost:11434/api/generate", json={"model": model, "keep_alive": 0}, timeout=30)
+    except Exception as e:
+        logger.warning(f"Could not unload Ollama model '{model}': {e}")
     return results
 def _generate_t2v_prompt(
     prompt_enhancer_model,
