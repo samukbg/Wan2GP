@@ -14,6 +14,20 @@ def safe_cuda_cleanup():
         except Exception: pass
         # Do not use ipc_collect() as it often causes 'resource already mapped' errors on Windows
 
+def clear_stale_cuda_error():
+    # A failed pinned-RAM allocation during partial pinning leaves a one-shot CUDA error
+    # (e.g. 'out of memory' / 'resource already mapped') that PyTorch reports on the next, unrelated
+    # kernel launch. Absorb it with a throwaway kernel so the real generation doesn't fail.
+    if not torch.cuda.is_available():
+        return
+    for _ in range(3):
+        try:
+            torch.zeros(1, device="cuda").add_(1)
+            torch.cuda.synchronize()
+            return
+        except Exception as e:
+            print(f"Cleared stale CUDA error (likely left by a failed pinned memory allocation): {str(e).splitlines()[0]}")
+
 p = os.path.dirname(os.path.abspath(__file__))
 if p not in sys.path:
     sys.path.insert(0, p)
@@ -4199,6 +4213,7 @@ def load_models(model_type, override_profile = -1, output_type="video", config_i
             _load_models_info("Pytorch compilation is not supported for this Model")
         # kwargs["pinnedMemory"] = "text_encoder"
         offloadobj = offload.profile(pipe, profile_no= mmgp_profile, compile = compile_modules, quantizeTransformer = False, loras = loras_transformer, perc_reserved_mem_max = perc_reserved_mem_max , vram_safety_coefficient = vram_safety_coefficient , convertWeightsFloatTo = transformer_dtype, loading_callback=loading_callback, **kwargs)
+        clear_stale_cuda_error()
     if len(args.gpu) > 0:
         torch.set_default_device(args.gpu)
     if track_as_main:
@@ -8069,6 +8084,7 @@ def generate_media(
                 overridden_inputs = None
                 if vae_upsampler_handler is not None and vae_upsampler_session is None:
                     vae_upsampler_session = upsampler_api.prepare_vae_upsampler(vae_upsampler_handler, spatial_upsampling, send_cmd=send_cmd, process_files=process_files_def, init_pipe=init_pipe, profile=compute_profile(override_profile, upsampler_api.profile_type_for_handler(vae_upsampler_handler)), attention_mode=attention_mode, spatial_upsampler_param=spatial_upsampler_param, spatial_upsampler_param2=spatial_upsampler_param2, spatial_upsampler_parameters=spatial_upsampler_parameters)
+                clear_stale_cuda_error()
                 samples = wan_model.generate(
                     input_prompt = prompt,
                     alt_prompt = current_alt_prompt,
