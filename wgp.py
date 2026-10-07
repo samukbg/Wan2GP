@@ -13840,6 +13840,24 @@ def get_all_model_types():
     global model_types
     return list(model_types)
 
+_STICKY_CUDA_ERRORS = ("illegal memory access", "device-side assert", "unspecified launch failure", "misaligned address")
+
+def _is_sticky_cuda_error(msg):
+    msg = (msg or "").lower()
+    return any(s in msg for s in _STICKY_CUDA_ERRORS)
+
+def _restart_server_after_cuda_failure(delay=5.0):
+    # A sticky CUDA error cannot be cleared in-process; relaunch with the same arguments.
+    import threading, subprocess
+    def _restart():
+        time.sleep(delay)  # let the error response reach the client first
+        print("[API /generate] Sticky CUDA error detected - restarting server process.")
+        try:
+            subprocess.Popen([sys.executable] + sys.argv, cwd=os.path.dirname(os.path.abspath(__file__)))
+        finally:
+            os._exit(1)
+    threading.Thread(target=_restart, daemon=True).start()
+
 def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None, sliding_window_size=None, prompt_enhancer=None, negative_prompt=None):
     """
     A dedicated wrapper for the /generate API endpoint.
@@ -13855,6 +13873,13 @@ def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale
             resolution, video_length, seed, image_mode, denoising_strength,
             image_start, image_end, audio_input, override_profile, masking_strength, sliding_window_size, prompt_enhancer, negative_prompt
         )
+    except BaseException as e:
+        # 'illegal memory access' & co. are sticky: the CUDA context is dead and every later
+        # request would fail the same way (after minutes of model loading). Restart the server.
+        if _is_sticky_cuda_error(str(e)):
+            _restart_server_after_cuda_failure()
+            raise gr.Error("CUDA context was corrupted (illegal memory access). The server is restarting automatically; please retry this request in about a minute.")
+        raise
     finally:
         try:
             try: release_model()
