@@ -14829,6 +14829,29 @@ def create_ui():
                     except: return {"status": "failed", "error": "Invalid JSON string provided"}
                 return await record_website(data)
 
+            def render_framefields_gradio_api(data):
+                # SpreadOut motion design on WebGPU (framefields_service/). Fixed templates; see workflow_endpoints.
+                from workflow_endpoints import render_framefields_task, FRAMEFIELDS_TEMPLATES
+                import uuid, os, threading, json
+                if isinstance(data, str):
+                    try: data = json.loads(data)
+                    except: return {"status": "failed", "error": "Invalid JSON string provided"}
+                if not isinstance(data, dict):
+                    return {"status": "failed", "error": "Payload must be a dictionary"}
+                template = data.get("template")
+                if template not in FRAMEFIELDS_TEMPLATES:
+                    return {"status": "failed", "error": f"Unknown template: {template}"}
+                execution_id = str(data.get("execution_id") or uuid.uuid4())
+                execution_id = "".join(c for c in execution_id if c.isalnum() or c in "-_")[:64] or str(uuid.uuid4())
+                output_path = os.path.join("outputs", f"ff_{execution_id}.{FRAMEFIELDS_TEMPLATES[template]}")
+                os.makedirs("outputs", exist_ok=True)
+                threading.Thread(target=render_framefields_task, args=(data, output_path, execution_id), daemon=True).start()
+                return {"status": "started", "execution_id": execution_id, "output_url": f"/file={output_path}"}
+
+            def framefields_status_gradio_api():
+                from workflow_endpoints import framefields_status
+                return framefields_status()
+
             def render_status_gradio_api(execution_id):
                 from workflow_endpoints import get_render_status
                 return get_render_status(execution_id)
@@ -14859,6 +14882,12 @@ def create_ui():
 
             api_record_website_btn = gr.Button("api_record_website_btn")
             api_record_website_btn.click(fn=record_website_gradio_api, inputs=[api_render_data], outputs=gr.JSON(), api_name="record_website")
+
+            api_framefields_btn = gr.Button("api_framefields_btn")
+            api_framefields_btn.click(fn=render_framefields_gradio_api, inputs=[api_render_data], outputs=gr.JSON(), api_name="framefields_render")
+
+            api_framefields_status_btn = gr.Button("api_framefields_status_btn")
+            api_framefields_status_btn.click(fn=framefields_status_gradio_api, inputs=[], outputs=gr.JSON(), api_name="framefields_status")
 
             api_render_status_id = gr.Textbox(label="execution_id")
             api_render_status_btn = gr.Button("api_render_status_btn")

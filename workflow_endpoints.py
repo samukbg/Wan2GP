@@ -1017,3 +1017,177 @@ def setup_workflow_endpoints(app):
         if not getattr(app, "_ephemeral_mw_wrapped", False):
             app.middleware_stack = EphemeralCleanupMiddleware(app.middleware_stack)
             app._ephemeral_mw_wrapped = True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# framefields (SpreadOut motion design on WebGPU) — see framefields_service/README.md
+# Fixed templates only. Inputs are downloaded here from allow-listed hosts into a fresh job directory;
+# the Node renderer only ever sees local paths, runs without a shell and with a minimal environment.
+# ─────────────────────────────────────────────────────────────────────────────
+import hmac
+import re
+from urllib.parse import urlparse
+
+FRAMEFIELDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "framefields_service")
+FRAMEFIELDS_TEMPLATES = {
+    "hook_title": "mp4",
+    "brand_grade": "mp4",
+    "chart_card": "mp4",
+    "product_carousel": "mp4",
+    "kinetic_captions": "mp4",
+    "beat_grid": "json",
+}
+FRAMEFIELDS_MEDIA_KEYS = {"video", "font", "audio", "music", "images"}
+FRAMEFIELDS_MAX_INPUT_BYTES = 600 * 1024 * 1024
+FRAMEFIELDS_TIMEOUT_S = 30 * 60
+_framefields_install_lock = __import__("threading").Lock()
+
+
+def _framefields_allowed_hosts() -> List[str]:
+    raw = os.environ.get("FRAMEFIELDS_ALLOWED_HOSTS", "spread-out-server.fly.dev,spreadout.ai")
+    return [h.strip().lower() for h in raw.split(",") if h.strip()]
+
+
+def _host_allowed(url: str) -> bool:
+    try:
+        u = urlparse(url)
+    except Exception:
+        return False
+    if u.scheme != "https" or not u.hostname:
+        return False
+    host = u.hostname.lower()
+    return any(host == h or host.endswith("." + h) for h in _framefields_allowed_hosts())
+
+
+def _safe_download(url: str, dest_dir: str, name: str) -> str:
+    """Downloads an allow-listed HTTPS URL into dest_dir under a sanitised name; returns the file name."""
+    if not _host_allowed(url):
+        raise ValueError(f"Input host not allowed: {urlparse(url).hostname}")
+    ext = os.path.splitext(urlparse(url).path)[1].lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,5}", ext or ""):
+        ext = ".bin"
+    filename = re.sub(r"[^a-z0-9_-]", "_", name.lower())[:40] + ext
+    dest = os.path.join(dest_dir, filename)
+    with requests.get(url, stream=True, timeout=120, allow_redirects=True) as r:
+        r.raise_for_status()
+        if not _host_allowed(r.url):  # a redirect must not leave the allow-list
+            raise ValueError(f"Redirected to a host that is not allowed: {urlparse(r.url).hostname}")
+        total = 0
+        with open(dest, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1 << 16):
+                total += len(chunk)
+                if total > FRAMEFIELDS_MAX_INPUT_BYTES:
+                    raise ValueError("Input file too large")
+                f.write(chunk)
+    return filename
+
+
+def _framefields_node() -> str:
+    node = shutil.which("node") or shutil.which("node.exe")
+    if not node:
+        raise RuntimeError("Node.js is not installed (framefields needs Node >= 22)")
+    out = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=20).stdout.strip()
+    major = int(re.match(r"v(\d+)", out).group(1)) if re.match(r"v(\d+)", out) else 0
+    if major < 22:
+        raise RuntimeError(f"framefields needs Node >= 22 (found {out or 'unknown'})")
+    return node
+
+
+def _framefields_env() -> Dict[str, str]:
+    """Minimal environment for the renderer: no inherited secrets."""
+    keep = ["PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "LANG", "VK_ICD_FILENAMES", "DISPLAY"]
+    env = {k: os.environ[k] for k in keep if k in os.environ}
+    env["FRAMEFIELDS_MODELS_DIR"] = os.path.join(FRAMEFIELDS_DIR, "models")
+    env["NODE_ENV"] = "production"
+    return env
+
+
+def ensure_framefields_env() -> str:
+    """Node >= 22 present and dependencies installed (npm ci from the pinned lockfile)."""
+    download_ffmpeg()
+    node = _framefields_node()
+    if not os.path.isdir(os.path.join(FRAMEFIELDS_DIR, "node_modules", "framefields")):
+        with _framefields_install_lock:
+            if not os.path.isdir(os.path.join(FRAMEFIELDS_DIR, "node_modules", "framefields")):
+                npm = (shutil.which("npm.cmd") or shutil.which("npm")) if os.name == "nt" else shutil.which("npm")
+                if not npm:
+                    raise RuntimeError("npm is not installed")
+                print("[framefields] Installing dependencies (npm ci)...")
+                # Constant arguments only; .cmd shims need the shell on Windows.
+                subprocess.run([npm, "ci", "--no-audit", "--no-fund"], cwd=FRAMEFIELDS_DIR, check=True, shell=(os.name == "nt"), timeout=1800)
+    return node
+
+
+def render_framefields_task(data: Dict[str, Any], output_path: str, execution_id: str):
+    executions[execution_id] = {"status": "processing", "progress": 0}
+    job_dir = tempfile.mkdtemp(prefix=f"framefields_{execution_id}_")
+    try:
+        expected = os.environ.get("SPREADOUT_RENDER_TOKEN", "")
+        if expected and not hmac.compare_digest(str(data.get("token", "")), expected):
+            raise PermissionError("Invalid render token")
+        template = data.get("template")
+        if template not in FRAMEFIELDS_TEMPLATES:
+            raise ValueError(f"Unknown template: {template}")
+        params = dict(data.get("params") or {})
+        inputs = data.get("inputs") or {}
+        if not isinstance(params, dict) or not isinstance(inputs, dict):
+            raise ValueError("params and inputs must be objects")
+
+        node = ensure_framefields_env()
+        executions[execution_id]["progress"] = 10
+
+        for key, value in inputs.items():
+            if key not in FRAMEFIELDS_MEDIA_KEYS:
+                raise ValueError(f"Unknown input: {key}")
+            if key == "images":
+                if not isinstance(value, list) or not 1 <= len(value) <= 6:
+                    raise ValueError("images must be a list of 1-6 URLs")
+                params["images"] = [_safe_download(u, job_dir, f"image_{i}") for i, u in enumerate(value)]
+            else:
+                params[key] = _safe_download(str(value), job_dir, key)
+        executions[execution_id]["progress"] = 30
+
+        ext = FRAMEFIELDS_TEMPLATES[template]
+        job = {
+            "template": template,
+            "width": int(data.get("width", 720)),
+            "height": int(data.get("height", 1280)),
+            "fps": int(data.get("fps", 30)),
+            "output": f"out.{ext}",
+            "params": params,
+        }
+        job_file = os.path.join(job_dir, "job.json")
+        with open(job_file, "w", encoding="utf-8") as f:
+            json.dump(job, f, ensure_ascii=False)
+
+        proc = subprocess.run(
+            [node, "--import", "tsx", os.path.join("src", "render.ts"), job_file],
+            cwd=FRAMEFIELDS_DIR, env=_framefields_env(), capture_output=True, text=True,
+            timeout=FRAMEFIELDS_TIMEOUT_S, shell=False,
+        )
+        line = next((l for l in reversed(proc.stdout.splitlines()) if l.startswith("FRAMEFIELDS_RESULT ")), None)
+        result = json.loads(line[len("FRAMEFIELDS_RESULT "):]) if line else {"ok": False, "error": (proc.stderr or proc.stdout or "no output")[-800:]}
+        if not result.get("ok"):
+            raise RuntimeError(result.get("error") or "framefields render failed")
+
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+        shutil.move(os.path.join(job_dir, f"out.{ext}"), output_path)
+        meta = {k: v for k, v in result.items() if k not in ("output", "ok")}
+        executions[execution_id] = {"status": "completed", "progress": 100, "output_path": output_path, "output_url": f"/file={output_path}", "result": meta}
+        print(f"[framefields] {template} done in {result.get('ms')} ms: {output_path}")
+    except Exception as e:
+        print(f"[framefields] render failed: {e}")
+        executions[execution_id] = {"status": "failed", "error": str(e)[:800]}
+    finally:
+        shutil.rmtree(job_dir, ignore_errors=True)
+
+
+def framefields_status() -> Dict[str, Any]:
+    """Readiness for SpreadOut: Node version, dependencies installed, templates."""
+    try:
+        node = _framefields_node()
+        version = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=20).stdout.strip()
+        installed = os.path.isdir(os.path.join(FRAMEFIELDS_DIR, "node_modules", "framefields"))
+        return {"ok": True, "node": version, "installed": installed, "templates": sorted(FRAMEFIELDS_TEMPLATES)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}

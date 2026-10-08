@@ -1,0 +1,37 @@
+{
+  "name": "spreadout-framefields-service",
+  "private": true,
+  "version": "1.0.0",
+  "description": "SpreadOut render templates on framefields (WebGPU). Fixed templates only: no user or LLM code runs here.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "render": "node --import tsx src/render.ts",
+    "selftest": "node --import tsx src/selftest.ts"
+  },
+  "dependencies": {
+    "fontkit": "^2.0.4",
+    "framefields": "2.0.8",
+    "sharp": "^0.35.5",
+    "tsx": "4.20.6",
+    "zod": "3.25.76"
+  },
+  "allowScripts": {
+    "skia-canvas": true,
+    "sharp": false,
+    "webgpu": false,
+    "onnxruntime-node": false,
+    "node-av": false,
+    "esbuild": false
+  },
+  "trustedDependencies": [
+    "skia-canvas"
+  ],
+  "devDependencies": {
+    "@types/fontkit": "^2.0.9",
+    "@types/node": "^22.19.1",
+    "typescript": "^5.9.3"
+  }
+}
