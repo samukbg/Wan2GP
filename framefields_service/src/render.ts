@@ -1,6 +1,7 @@
 // Entry point: node --import tsx src/render.ts <job.json>
 // The job file is written by Wan2GP (workflow_endpoints.py) into a fresh job directory together with the
 // downloaded inputs. Only the fixed templates below can run — no code, expressions or URLs come in.
+import "./ffmpegPath.js";
 import fs from "node:fs";
 import path from "node:path";
 import { Job } from "./schema.js";

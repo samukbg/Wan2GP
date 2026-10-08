@@ -1,5 +1,6 @@
 // `npm run selftest`: renders every template from synthetic inputs, to check a server is ready
 // (Node ≥22, WebGPU adapter, ffmpeg, native modules). Prints one line per template.
+import "./ffmpegPath.js";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -14,7 +15,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ff-selftest-"));
 const font = FONT_CANDIDATES.find((f) => fs.existsSync(f));
 if (!font) { console.error("No bold system font found for the self-test."); process.exit(1); }
 fs.copyFileSync(font, path.join(dir, "font.ttf"));
-const ff = (args: string[]) => { const r = spawnSync("ffmpeg", ["-v", "error", "-y", ...args], { cwd: dir }); if (r.status !== 0) throw new Error(`ffmpeg: ${r.stderr}`); };
+const ff = (args: string[]) => { const r = spawnSync("ffmpeg", ["-v", "error", "-y", ...args], { cwd: dir }); if (r.status !== 0) throw new Error(`ffmpeg: ${r.error ? `${r.error.message} (no ffmpeg on PATH or in ../ffmpeg_bins)` : r.stderr}`); };
 ff(["-f", "lavfi", "-i", "testsrc2=size=720x1280:rate=30:duration=3", "-f", "lavfi", "-i", "sine=frequency=220:duration=3", "-shortest", "-pix_fmt", "yuv420p", "clip.mp4"]);
 ff(["-f", "lavfi", "-i", "aevalsrc=0.9*sin(2*PI*55*t)*exp(-25*mod(t\\,0.5)):s=44100:d=6", "music.wav"]);
 ff(["-f", "lavfi", "-i", "color=c=white:s=600x600", "-frames:v", "1", "product.png"]);
