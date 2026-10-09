@@ -50,6 +50,14 @@ if hasattr(torch.cuda, "empty_cache"):
             pass
     torch.cuda.empty_cache = _safe_cuda_empty_cache
 
+# accelerate's init_empty_weights patches nn.Module globally; overlapping uses from several threads can leave
+# the patch installed for good, which makes every later load end up with meta (empty) parameters.
+_pristine_module_methods = (torch.nn.Module.register_parameter, torch.nn.Module.register_buffer)
+def restore_module_registration():
+    if (torch.nn.Module.register_parameter, torch.nn.Module.register_buffer) != _pristine_module_methods:
+        print("[Warning] Stale 'init_empty_weights' patch detected, restoring torch.nn.Module registration.")
+        torch.nn.Module.register_parameter, torch.nn.Module.register_buffer = _pristine_module_methods
+
 # tlog.set_logs(recompiles=True, guards=True, graph_breaks=True)
 # from shared.utils.crash_diagnostics import install_wgp_crash_diagnostics; install_wgp_crash_diagnostics(__file__)
 # Ensure plugin-side `import wgp` resolves to this live module instance.
@@ -4188,6 +4196,7 @@ def load_models(model_type, override_profile = -1, output_type="video", config_i
     if text_encoder_filename:
         loading_model_ids[text_encoder_filename] = "text_encoder"
     with model_unload_guard(), offload.loading_context(loading_callback, loading_model_ids):
+        restore_module_registration()
         torch.set_default_device('cpu')
         wan_model, pipe = model_type_handler.load_model(
                     local_model_file_list, runtime_model_type or model_type, base_model_type, model_def, quantizeTransformer = quantizeTransformer, text_encoder_quantization = text_encoder_quantization,
