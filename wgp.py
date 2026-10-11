@@ -13849,7 +13849,9 @@ def get_all_model_types():
     global model_types
     return list(model_types)
 
-_STICKY_CUDA_ERRORS = ("illegal memory access", "device-side assert", "unspecified launch failure", "misaligned address")
+# cuBLAS failures (e.g. CUBLAS_STATUS_NOT_SUPPORTED on a bf16 GEMM right after an out-of-VRAM error)
+# also mean the context is unusable: every later job fails the same way until the process restarts.
+_STICKY_CUDA_ERRORS = ("illegal memory access", "device-side assert", "unspecified launch failure", "misaligned address", "cublas_status_")
 
 def _is_sticky_cuda_error(msg):
     msg = (msg or "").lower()
@@ -13887,7 +13889,7 @@ def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale
         # request would fail the same way (after minutes of model loading). Restart the server.
         if _is_sticky_cuda_error(str(e)):
             _restart_server_after_cuda_failure()
-            raise gr.Error("CUDA context was corrupted (illegal memory access). The server is restarting automatically; please retry this request in about a minute.")
+            raise gr.Error(f"CUDA context was corrupted ({str(e)[:160]}). The server is restarting automatically; please retry this request in about a minute.")
         raise
     finally:
         try:
