@@ -13867,7 +13867,7 @@ def _restart_server_after_cuda_failure(delay=5.0):
             os._exit(1)
     threading.Thread(target=_restart, daemon=True).start()
 
-def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None, sliding_window_size=None, prompt_enhancer=None, negative_prompt=None):
+def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None, sliding_window_size=None, prompt_enhancer=None, negative_prompt=None, loras=None):
     """
     A dedicated wrapper for the /generate API endpoint.
     Waits for sufficient RAM/VRAM, serialises concurrent requests, then delegates
@@ -13880,7 +13880,7 @@ def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale
         return _api_endpoint_handler_inner(
             model_type, prompt, num_inference_steps, guidance_scale,
             resolution, video_length, seed, image_mode, denoising_strength,
-            image_start, image_end, audio_input, override_profile, masking_strength, sliding_window_size, prompt_enhancer, negative_prompt
+            image_start, image_end, audio_input, override_profile, masking_strength, sliding_window_size, prompt_enhancer, negative_prompt, loras
         )
     except BaseException as e:
         # 'illegal memory access' & co. are sticky: the CUDA context is dead and every later
@@ -13914,7 +13914,39 @@ def api_endpoint_handler(model_type, prompt, num_inference_steps, guidance_scale
             release_generation_slot()
 
 
-def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None, sliding_window_size=None, prompt_enhancer=None, negative_prompt=None):
+def _api_parse_loras(loras):
+    """
+    The `loras` API input: a JSON list of {"url" | "name", "multiplier"} (or of plain strings), or empty.
+    Returns (activated_loras, multipliers). URLs are kept as URLs: generate_media caches them and
+    downloads a missing file into the model's LoRA folder (update_loras_url_cache + check_loras_exist).
+    """
+    if not loras or not isinstance(loras, str) or not loras.strip():
+        return [], []
+    try:
+        items = json.loads(loras)
+    except Exception:
+        print(f"[API /generate] Ignoring unreadable loras input: {loras[:200]}")
+        return [], []
+    if isinstance(items, (str, dict)):
+        items = [items]
+    activated, multipliers = [], []
+    for it in items if isinstance(items, list) else []:
+        ref = it if isinstance(it, str) else (it.get("url") or it.get("name") if isinstance(it, dict) else None)
+        if not ref or not isinstance(ref, str):
+            continue
+        ref = ref.strip()
+        if not (ref.startswith("https://") or ref.startswith("http://")):
+            ref = os.path.basename(ref)  # a file already in the model's LoRA folder; no paths from the API
+        try:
+            mult = float(it.get("multiplier", 1.0)) if isinstance(it, dict) else 1.0
+        except Exception:
+            mult = 1.0
+        activated.append(ref)
+        multipliers.append(f"{max(0.0, min(2.0, mult)):g}")
+    return activated, multipliers
+
+
+def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidance_scale, resolution, video_length, seed, image_mode, denoising_strength=None, image_start=None, image_end=None, audio_input=None, override_profile=-1, masking_strength=None, sliding_window_size=None, prompt_enhancer=None, negative_prompt=None, loras=None):
     global transformer_type
     import gc
     import torch
@@ -14424,6 +14456,12 @@ def _api_endpoint_handler_inner(model_type, prompt, num_inference_steps, guidanc
     else:
         params['masking_strength'] = 0.0
     
+    activated, multipliers = _api_parse_loras(loras)
+    if activated:
+        params['activated_loras'] = activated
+        params['loras_multipliers'] = " ".join(multipliers)
+        print(f"[API /generate] LoRAs: {', '.join(os.path.basename(a.split('|')[0]) for a in activated)} x {params['loras_multipliers']}")
+
     params['task'] = {}
     params['plugin_data'] = {}
     params['state'] = state
@@ -14756,6 +14794,9 @@ def create_ui():
             api_sliding_window_size = gr.Number(label="sliding_window_size")
             api_prompt_enhancer = gr.Textbox(label="prompt_enhancer")
             api_negative_prompt = gr.Textbox(label="negative_prompt")
+            # Optional JSON list of LoRAs for this job: [{"url": "https://.../x.safetensors", "multiplier": 1.0}].
+            # A URL LoRA is downloaded into the model's LoRA folder on first use (check_loras_exist).
+            api_loras = gr.Textbox(label="loras")
 
             api_gen_btn = gr.Button("api_gen_btn")
             api_gen_btn.click(
@@ -14769,6 +14810,21 @@ def create_ui():
                 ],
                 outputs=gr.File(),
                 api_name="wan2gp_generate"
+            )
+            # Same as wan2gp_generate plus the `loras` input (a separate endpoint so clients that send the
+            # 17 classic inputs keep working; Spread Out uses this one only when a server exposes it).
+            api_gen_lora_btn = gr.Button("api_gen_lora_btn")
+            api_gen_lora_btn.click(
+                fn=api_endpoint_handler,
+                inputs=[
+                    api_model_type, api_prompt, api_num_inference_steps, api_guidance_scale,
+                    api_resolution, api_video_length, api_seed, api_image_mode,
+                    api_denoising_strength, api_image_start, api_image_end,
+                    api_audio_input, api_override_profile, api_masking_strength, api_sliding_window_size,
+                    api_prompt_enhancer, api_negative_prompt, api_loras
+                ],
+                outputs=gr.File(),
+                api_name="wan2gp_generate_lora"
             )
 
             # Define utility functions for APIs
